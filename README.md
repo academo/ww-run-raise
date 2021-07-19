@@ -40,6 +40,11 @@ If you want to raise any window that matches a title. JS regexp allowed:
 -c  --command             command to check if running and run if no process is found
 ```
 
+# Create shortcuts
+
+You can use KDE custom shortcuts to add a custom shortcut that calls ww
+
+
 # How does it work?
 
 Internall ww uses 2 main things to work: `pgrep` and "on demand" KWin scripts.
