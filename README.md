@@ -33,11 +33,12 @@ If you want to raise any window that matches a title. JS regexp allowed:
 `ww -fa 'Zoom meeting'`
 
 ## Paramaters:
-
+```
 -h  --help                show this help
 -f  --filter              filter by window class
 -fa --filter-alternative  filter by window title (caption)
 -c  --command             command to check if running and run if no process is found
+```
 
 # How does it work?
 
