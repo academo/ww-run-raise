@@ -1,0 +1,122 @@
+#!/bin/bash
+# Usage: ww -f "window class filter" -c "run if not found"
+# Usage: ww -fa "window title filter" -c "run if not found"
+
+POSITIONAL=()
+while [[ $# -gt 0 ]]; do
+  key="$1"
+
+  case $key in
+  -c | --command)
+    COMMAND="$2"
+    shift # past argument
+    shift # past value
+    ;;
+  -f | --filter)
+    FILTERBY="$2"
+    shift # past argument
+    shift # past value
+    ;;
+  -fa | --filter-alternative)
+    FILTERALT="$2"
+    shift # past argument
+    shift # past value
+    ;;
+  -h | --help)
+    HELP="1"
+    shift # past argument
+    shift # past value
+    ;;
+  *)                   # unknown option
+    POSITIONAL+=("$1") # save it in an array for later
+    shift              # past argument
+    ;;
+  esac
+done
+
+set -- "${POSITIONAL[@]}" # restore positional parameters
+
+if [ -n "$HELP" ]; then
+  cat <<EOF
+ww. Utility to raise or jump an applications in KDE. It interacts with KWin using KWin scripts and it is compatible with X11 and Wayland
+
+Paramaters:
+
+-h  --help                show this help
+-f  --filter              filter by window class
+-fa --filter-alternative  filter by window title (caption)
+-c  --command             command to check if running and run if no process is found
+EOF
+  exit 0
+fi
+
+SCRIPT_TEMPLATE=$(
+  cat <<EOF
+function kwinactivateclient(clientClass, clientCaption) {
+  var clients = workspace.clientList();
+  var compareToCaption = new RegExp(clientCaption || '', 'i');
+  var compareToClass = clientClass;
+  var isCompareToClass = clientClass.length > 0
+  for (var i=0; i<clients.length; i++) {
+      var client = clients[i];
+      if (isCompareToClass && client.resourceClass == compareToClass) {
+          workspace.activeClient = client;
+        break;
+      } else if (!isCompareToClass && compareToCaption.exec(client.caption)) {
+        workspace.activeClient = client;
+        break;
+      }
+  }
+}
+kwinactivateclient('CLASS_NAME', 'CAPTION_NAME');
+EOF
+)
+
+CURRENT_SCRIPT_NAME=$(basename $0)
+
+# ensure the script file exists
+function ensure_script {
+  if [ ! -f SCRIPT_PATH ]; then
+    if [ ! -d "$SCRIPT_FOLDER" ]; then
+      mkdir -p "$SCRIPT_FOLDER"
+    fi
+    SCRIPT_CONTENT=${SCRIPT_TEMPLATE/CLASS_NAME/$1}
+    SCRIPT_CONTENT=${SCRIPT_CONTENT/CAPTION_NAME/$2}
+    #if [ "$1" == "class" ]; then
+    #SCRIPT_CONTENT=${SCRIPT_CLASS_NAME/REPLACE_ME/$2}
+    #else
+    #SCRIPT_CONTENT=${SCRIPT_CAPTION/REPLACE_ME/$2}
+    #fi
+    echo "$SCRIPT_CONTENT" >"$SCRIPT_PATH"
+  fi
+}
+
+if [ -z "$FILTERBY" ] && [ -z "$FILTERALT" ]; then
+  echo You need to specify a window filter. Either by class -f or by title -fa
+  exit 1
+fi
+
+IS_RUNNING=$(pgrep -o -a -f "$COMMAND" | grep -v "$CURRENT_SCRIPT_NAME")
+
+if [ -n "$IS_RUNNING" ] || [ -n "$FILTERALT" ]; then
+  SCRIPT_FOLDER="$HOME/.wwscripts/"
+  SCRIPT_NAME=$(echo "$FILTERBY$FILTERALT" | md5sum | head -c 32)
+  SCRIPT_PATH="$SCRIPT_FOLDER$SCRIPT_NAME"
+  ensure_script "$FILTERBY" "$FILTERALT"
+
+  SCRIPT_NAME="ww$RANDOM"
+  #SCRIPT_NAME=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)
+
+  # install the script
+  ID=$(dbus-send --session --dest=org.kde.KWin --print-reply=literal /Scripting org.kde.kwin.Scripting.loadScript "string:$SCRIPT_PATH" "string:$SCRIPT_NAME" | awk '{print $2}')
+  # run it - some KDEs version use Script.run others Scripting.run
+  dbus-send --session --dest=org.kde.KWin --print-reply=literal "/$ID" org.kde.kwin.Scripting.run >/dev/null 2>&1
+  dbus-send --session --dest=org.kde.KWin --print-reply=literal "/$ID" org.kde.kwin.Script.run >/dev/null 2>&1
+  # stop it - some KDEs version use Script.run others Scripting.run
+  dbus-send --session --dest=org.kde.KWin --print-reply=literal "/$ID" org.kde.kwin.Scripting.stop >/dev/null 2>&1
+  dbus-send --session --dest=org.kde.KWin --print-reply=literal "/$ID" org.kde.kwin.Script.stop >/dev/null 2>&1
+  # uninstall it
+  dbus-send --session --dest=org.kde.KWin --print-reply=literal /Scripting org.kde.kwin.Scripting.unloadScript "string:$SCRIPT_NAME" >/dev/null 2>&1
+elif [ -n "$COMMAND" ]; then
+  $COMMAND &
+fi
