@@ -49,7 +49,7 @@ You can use KDE custom shortcuts to add a custom shortcut that calls ww
 
 # How does it work?
 
-Internall ww uses 2 main things to work: `pgrep` and "on demand" KWin scripts.
+Internally ww uses 2 main things to work: `pgrep` and "on demand" KWin scripts.
 
 When you run, for example `ww -f firefox c -firefox`, ww tries to find a process running with the exact command:
 
@@ -57,7 +57,7 @@ When you run, for example `ww -f firefox c -firefox`, ww tries to find a process
 
 This detects if the application is running or not.
 
-Then ww creates a file inside `~/.wwscripts` to store a temporal kwin script, it loads the script, runs it, stops it and unloads it in a single go.
+Then ww creates a file inside `~/.wwscripts` to store a temporary kwin script, it loads the script, runs it, stops it and unloads it in a single go.
 
 The kwin script is targeted to find and focus a specific window.
 
