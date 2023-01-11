@@ -2,6 +2,7 @@
 # Usage: ww -f "window class filter" -c "run if not found"
 # Usage: ww -fa "window title filter" -c "run if not found"
 
+TOGGLE="false"
 POSITIONAL=()
 while [[ $# -gt 0 ]]; do
 	key="$1"
@@ -21,6 +22,10 @@ while [[ $# -gt 0 ]]; do
 		FILTERALT="$2"
 		shift # past argument
 		shift # past value
+		;;
+	-t | --toggle)
+		TOGGLE="true"
+		shift # past argument
 		;;
 	-h | --help)
 		HELP="1"
@@ -45,6 +50,7 @@ Paramaters:
 -h  --help                show this help
 -f  --filter              filter by window class
 -fa --filter-alternative  filter by window title (caption)
+-t  --toggle              also minimize the window if it is already active
 -c  --command             command to check if running and run if no process is found
 EOF
 	exit 0
@@ -52,7 +58,7 @@ fi
 
 SCRIPT_TEMPLATE=$(
 	cat <<EOF
-function kwinactivateclient(clientClass, clientCaption) {
+function kwinactivateclient(clientClass, clientCaption, toggle) {
   var clients = workspace.clientList();
   var compareToCaption = new RegExp(clientCaption || '', 'i');
   var compareToClass = clientClass;
@@ -64,14 +70,14 @@ function kwinactivateclient(clientClass, clientCaption) {
       if (classCompare || captionCompare) {
           if (workspace.activeClient != client) {
               workspace.activeClient = client;
-          } else {
+          } else if (toggle) {
               client.minimized = true;
           }
           break;
       }
   }
 }
-kwinactivateclient('CLASS_NAME', 'CAPTION_NAME');
+kwinactivateclient('CLASS_NAME', 'CAPTION_NAME', TOGGLE);
 EOF
 )
 
@@ -85,6 +91,7 @@ function ensure_script {
 		fi
 		SCRIPT_CONTENT=${SCRIPT_TEMPLATE/CLASS_NAME/$1}
 		SCRIPT_CONTENT=${SCRIPT_CONTENT/CAPTION_NAME/$2}
+        SCRIPT_CONTENT=${SCRIPT_CONTENT/TOGGLE/$3}
 		#if [ "$1" == "class" ]; then
 		#SCRIPT_CONTENT=${SCRIPT_CLASS_NAME/REPLACE_ME/$2}
 		#else
@@ -113,7 +120,7 @@ if [ -n "$IS_RUNNING" ] || [ -n "$FILTERALT" ]; then
 	SCRIPT_FOLDER="$SCRIPT_FOLDER_ROOT/.wwscripts/"
 	SCRIPT_NAME=$(echo "$FILTERBY$FILTERALT" | md5sum | head -c 32)
 	SCRIPT_PATH="$SCRIPT_FOLDER$SCRIPT_NAME"
-	ensure_script "$FILTERBY" "$FILTERALT"
+	ensure_script "$FILTERBY" "$FILTERALT" "$TOGGLE"
 
 	SCRIPT_NAME="ww$RANDOM"
 	#SCRIPT_NAME=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)
