@@ -59,12 +59,15 @@ function kwinactivateclient(clientClass, clientCaption) {
   var isCompareToClass = clientClass.length > 0
   for (var i=0; i<clients.length; i++) {
       var client = clients[i];
-      if (isCompareToClass && client.resourceClass == compareToClass) {
-          workspace.activeClient = client;
-        break;
-      } else if (!isCompareToClass && compareToCaption.exec(client.caption)) {
-        workspace.activeClient = client;
-        break;
+      var classCompare = (isCompareToClass && client.resourceClass == compareToClass)
+      var captionCompare = (!isCompareToClass && compareToCaption.exec(client.caption))
+      if (classCompare || captionCompare) {
+          if (workspace.activeClient != client) {
+              workspace.activeClient = client;
+          } else {
+              client.minimized = true;
+          }
+          break;
       }
   }
 }
