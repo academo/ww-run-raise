@@ -1,6 +1,8 @@
 #!/bin/bash
 # Usage: ww -f "window class filter" -c "run if not found"
 # Usage: ww -fa "window title filter" -c "run if not found"
+# Usage: ww -ia
+# Usage: (other ones, please see the help of this script)
 
 TOGGLE="false"
 POSITIONAL=()
@@ -32,6 +34,10 @@ while [[ $# -gt 0 ]]; do
 		shift # past argument
 		shift # past value
 		;;
+	-ia | --info-active)
+		INFO_ACTIVE="1"
+		shift # past argument
+		;;			
 	*)                  # unknown option
 		POSITIONAL+=("$1") # save it in an array for later
 		shift              # past argument
@@ -43,17 +49,54 @@ set -- "${POSITIONAL[@]}" # restore positional parameters
 
 if [ -n "$HELP" ]; then
 	cat <<EOF
-ww. Utility to raise or jump an applications in KDE. It interacts with KWin using KWin scripts and it is compatible with X11 and Wayland
+ww. Utility to launch a window (or raise it, if it was minimized), or to show information about the active window, or to perform other operations with windows in KDE Plasma. It interacts with KWin using KWin scripts and it is compatible with X11 and Wayland.
 
-Paramaters:
+Parameters:
 
 -h  --help                show this help
+-ia --info-active         show information about the active window. Using this parameter, this program can be periodically called from
+                          other programs, so the user is able to know how much time he/she spends using particular windows, or the user 
+                          is able to stop (in order to save CPU use, bandwith or downloaded MBs) programs when they are not in the
+                          foreground, etc.
 -f  --filter              filter by window class
 -fa --filter-alternative  filter by window title (caption)
 -t  --toggle              also minimize the window if it is already active
 -c  --command             command to check if running and run if no process is found
 EOF
 	exit 0
+fi
+
+if [ -n "$INFO_ACTIVE" ]; then
+    kwinSupportInfo="$(qdbus org.kde.KWin /KWin supportInformation)" || exit 1
+    kwinVersion="$(awk '/KWin version:/ {print $3}' <<< "$kwinSupportInfo")" || exit 1
+    kwinMajorVersion="$(awk -F"." '{print $1}' <<< "$kwinVersion")" || exit 1    
+    # This feature needs at least this KWin version
+    readonly minimumVersion=6 || exit 1
+    if [[ "$kwinMajorVersion" -lt "$minimumVersion" ]]; then
+        echo "ERROR: This feature needs KWin $minimumVersion or later." >&2 
+        exit 1
+    fi
+
+    # This way is similar to the one used on https://discuss.kde.org/t/xdotool-replacement-on-wayland/7242/9
+    jsFile="$(mktemp)" || exit 1   # It is the file where the javascript code is going to be saved
+    echo "print(\"$jsFile\",workspace.activeWindow.internalId);" > "$jsFile" || exit 1
+    
+    scriptId="$(qdbus org.kde.KWin /Scripting loadScript "$jsFile")" || exit 1
+    timestamp="$(date +"%Y-%m-%d %H:%M:%S")" || exit 1
+    # Starts the script
+    qdbus org.kde.KWin /Scripting/Script"$scriptId" run || exit 1
+    
+    # Uses some arguments that are also seen on https://github.com/jinliu/kdotool/blob/master/src/main.rs
+    outputJournalctl="$(journalctl --since "$timestamp" --user --user-unit=plasma-kwin_wayland.service --user-unit=plasma-kwin_x11.service --output=cat -g "js: $jsFile")" || exit 1
+    # Uses `awk` separately in order to avoid masking a return value, as Shellcheck recommends
+    windowId="$(awk '{print $3}' <<< "$outputJournalctl")" || exit 1
+    # Stops the script
+    qdbus org.kde.KWin /Scripting/Script"$scriptId" stop || exit 1
+    
+    # Shows the information about that window
+    qdbus org.kde.KWin /KWin org.kde.KWin.getWindowInfo "$windowId" || exit 1
+    
+    exit 0
 fi
 
 SCRIPT_TEMPLATE=$(
@@ -102,7 +145,7 @@ function ensure_script {
 }
 
 if [ -z "$FILTERBY" ] && [ -z "$FILTERALT" ]; then
-	echo You need to specify a window filter. Either by class -f or by title -fa
+	echo "If you want that this program find a window, you need to specify a window filter — either by class (\`-f\`) or by title (\`-fa\`). More information can be seen if this script is called using the \`--help\` parameter."
 	exit 1
 fi
 
