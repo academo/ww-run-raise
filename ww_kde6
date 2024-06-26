@@ -123,16 +123,16 @@ if [ -n "$IS_RUNNING" ] || [ -n "$FILTERALT" ]; then
 	ensure_script "$FILTERBY" "$FILTERALT" "$TOGGLE"
 
 	# install the script
-	ID=$(dbus-send --print-reply --dest=org.kde.KWin /Scripting org.kde.kwin.Scripting.loadScript "string:$SCRIPT_PATH" "string:$SCRIPT_NAME" | awk 'END {print $2}')
+	ID=$(dbus-send --session --print-reply --dest=org.kde.KWin /Scripting org.kde.kwin.Scripting.loadScript "string:$SCRIPT_PATH" "string:$SCRIPT_NAME" | awk 'END {print $2}')
 	# run the script
-	dbus-send --print-reply --dest=org.kde.KWin /Scripting/Script$ID org.kde.kwin.Script.run >/dev/null 2>&1
-	dbus-send --print-reply --dest=org.kde.KWin /Scripting/Script$ID org.kde.kwin.Scripting.run >/dev/null 2>&1
+	dbus-send --session --print-reply --dest=org.kde.KWin /Scripting/Script$ID org.kde.kwin.Script.run >/dev/null 2>&1
+	dbus-send --session --print-reply --dest=org.kde.KWin /Scripting/Script$ID org.kde.kwin.Scripting.run >/dev/null 2>&1
 	# stop the script
-	dbus-send --print-reply --dest=org.kde.KWin /Scripting/Script$ID org.kde.kwin.Script.stop >/dev/null 2>&1
-	dbus-send --print-reply --dest=org.kde.KWin /Scripting/Script$ID org.kde.kwin.Scripting.stop >/dev/null 2>&1
+	dbus-send --session --print-reply --dest=org.kde.KWin /Scripting/Script$ID org.kde.kwin.Script.stop >/dev/null 2>&1
+	dbus-send --session --print-reply --dest=org.kde.KWin /Scripting/Script$ID org.kde.kwin.Scripting.stop >/dev/null 2>&1
 
 	# uninstall the script
-	dbus-send --print-reply --dest=org.kde.KWin /Scripting org.kde.kwin.Scripting.unloadScript "string:$SCRIPT_NAME" >/dev/null 2>&1
+	dbus-send --session --print-reply --dest=org.kde.KWin /Scripting org.kde.kwin.Scripting.unloadScript "string:$SCRIPT_NAME" >/dev/null 2>&1
 elif [ -n "$COMMAND" ]; then
 	$COMMAND &
 fi
