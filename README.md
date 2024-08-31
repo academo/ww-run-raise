@@ -19,18 +19,34 @@ ww only works in KDE. It works in X11 and Wayland.
 
 if you want to raise or jump to an open firefox window:
 
-`ww -f firefox -c firefox`
+```bash
+ww -f firefox -c firefox
+```
 
 if you want to raise or jump to an app with an specific class:
 
-`ww -f kitty.terminal -c 'kitty --class kitty.terminal'`
+```bash
+ww -f kitty.terminal -c 'kitty --class kitty.terminal'
+```
 
 Note: In this example `kitty` allows you to pass the `class` option that sets the window class.
 This is a kitty feature, not a ww feature.
 
 If you want to raise any window that matches a title. JS regexp allowed:
 
-`ww -fa 'Zoom meeting'`
+```bash
+ww -fa 'Zoom meeting'
+```
+
+Sometimes the command to start a program only indirectly runs the actual
+program, making it not directly findable, such as when using flatpaks. Then you
+can use `-p` to separate the string used when searching for the application:
+```bash
+ww -f steam -p steam -c 'flatpak run --branch=stable --arch=x86_64 --command=/app/bin/steam --file-forwarding com.valvesoftware.Steam'
+```
+
+(The value specified to `-p` is directly passed along to `pgrep`, see "How does
+it work?" below.)
 
 ## Paramaters:
 ```
@@ -38,6 +54,7 @@ If you want to raise any window that matches a title. JS regexp allowed:
 -f  --filter              filter by window class
 -fa --filter-alternative  filter by window title (caption)
 -c  --command             command to check if running and run if no process is found
+-p  --process             overide the process name used when checking if running, defaults to --command
 ```
 
 # Create shortcuts
@@ -53,7 +70,7 @@ Internally ww uses 2 main things to work: `pgrep` and "on demand" KWin scripts.
 
 When you run, for example `ww -f firefox c -firefox`, ww tries to find a process running with the exact command:
 
-`pgrep -o -f firefox`
+`pgrep -o -a -f firefox`
 
 This detects if the application is running or not.
 

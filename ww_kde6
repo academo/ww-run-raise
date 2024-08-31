@@ -1,6 +1,6 @@
 #!/bin/bash
-# Usage: ww -f "window class filter" -c "run if not found"
-# Usage: ww -fa "window title filter" -c "run if not found"
+# Usage: ww -f "window class filter" -c "run if not found" [-p "process name"]
+# Usage: ww -fa "window title filter" -c "run if not found" [-p "process name"]
 
 TOGGLE="false"
 POSITIONAL=()
@@ -10,6 +10,11 @@ while [[ $# -gt 0 ]]; do
 	case $key in
 	-c | --command)
 		COMMAND="$2"
+		shift # past argument
+		shift # past value
+		;;
+	-p | --process)
+		PROCESS="$2"
 		shift # past argument
 		shift # past value
 		;;
@@ -41,6 +46,10 @@ done
 
 set -- "${POSITIONAL[@]}" # restore positional parameters
 
+if [ -z "$PROCESS" ]; then
+	PROCESS=$COMMAND
+fi
+
 if [ -n "$HELP" ]; then
 	cat <<EOF
 ww. Utility to raise or jump an applications in KDE. It interacts with KWin using KWin scripts and it is compatible with X11 and Wayland
@@ -52,6 +61,7 @@ Paramaters:
 -fa --filter-alternative  filter by window title (caption)
 -t  --toggle              also minimize the window if it is already active
 -c  --command             command to check if running and run if no process is found
+-p  --process             overide the process name used when checking if running, defaults to --command
 EOF
 	exit 0
 fi
@@ -106,7 +116,7 @@ if [ -z "$FILTERBY" ] && [ -z "$FILTERALT" ]; then
 	exit 1
 fi
 
-IS_RUNNING=$(pgrep -o -a -f "$COMMAND" | grep -v "$CURRENT_SCRIPT_NAME")
+IS_RUNNING=$(pgrep -o -a -f "$PROCESS" | grep -v "$CURRENT_SCRIPT_NAME")
 
 if [ -n "$IS_RUNNING" ] || [ -n "$FILTERALT" ]; then
 	
