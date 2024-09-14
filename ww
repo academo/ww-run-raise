@@ -106,7 +106,7 @@ if [ -z "$FILTERBY" ] && [ -z "$FILTERALT" ]; then
 	exit 1
 fi
 
-IS_RUNNING=$(pgrep -o -a -f "$COMMAND" | grep -v "$CURRENT_SCRIPT_NAME")
+IS_RUNNING=$(pgrep -u "$(whoami)" -o -a -f "$COMMAND" | grep -v "$CURRENT_SCRIPT_NAME")
 
 if [ -n "$IS_RUNNING" ] || [ -n "$FILTERALT" ]; then
 
