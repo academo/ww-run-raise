@@ -59,23 +59,39 @@ fi
 SCRIPT_TEMPLATE=$(
 	cat <<EOF
 function kwinactivateclient(clientClass, clientCaption, toggle) {
-  var clients = workspace.clientList();
-  var compareToCaption = new RegExp(clientCaption || '', 'i');
-  var compareToClass = clientClass;
-  var isCompareToClass = clientClass.length > 0
-  for (var i=0; i<clients.length; i++) {
-      var client = clients[i];
-      var classCompare = (isCompareToClass && client.resourceClass == compareToClass)
-      var captionCompare = (!isCompareToClass && compareToCaption.exec(client.caption))
-      if (classCompare || captionCompare) {
-          if (workspace.activeClient != client) {
-              workspace.activeClient = client;
-          } else if (toggle) {
-              client.minimized = true;
-          }
-          break;
-      }
-  }
+    var clients = workspace.clientList();
+    var compareToCaption = new RegExp(clientCaption || '', 'i');
+    var compareToClass = clientClass;
+    var isCompareToClass = clientClass.length > 0;
+    var matchingClients = [];
+
+    for (var i = 0; i < clients.length; i++) {
+        var client = clients[i];
+        var classCompare = (isCompareToClass && client.resourceClass == compareToClass)
+        var captionCompare = (!isCompareToClass && compareToCaption.exec(client.caption))
+        if (classCompare || captionCompare) {
+            matchingClients.push(client);
+        }
+    }
+
+    if (matchingClients.length === 1) {
+        var client = matchingClients[0];
+        if (workspace.activeClient !== client) {
+            workspace.activeClient = client;
+        } else if (toggle) {
+            client.minimized = !client.minimized;
+        }
+    } else if (matchingClients.length > 1) {
+        var currentIndex = -1;
+        for (var i = 0; i < matchingClients.length; i++) {
+            if (workspace.activeClient === matchingClients[i]) {
+                currentIndex = i;
+                break;
+            }
+        }
+        var nextIndex = (currentIndex + 1) % matchingClients.length;
+        workspace.activeClient = matchingClients[nextIndex];
+    }
 }
 kwinactivateclient('CLASS_NAME', 'CAPTION_NAME', TOGGLE);
 EOF
