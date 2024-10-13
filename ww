@@ -82,7 +82,11 @@ function kwinactivateclient(clientClass, clientCaption, toggle) {
             client.minimized = !client.minimized;
         }
     } else if (matchingClients.length > 1) {
-        var currentIndex = -1;
+  	matchingWindows.sort(function (a, b) {
+    	    return a.stackingOrder - b.stackingOrder;
+  	});
+
+        var currentIndex = matchingClients.length - 2;
         for (var i = 0; i < matchingClients.length; i++) {
             if (workspace.activeClient === matchingClients[i]) {
                 currentIndex = i;
