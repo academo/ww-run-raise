@@ -123,13 +123,15 @@ if [ -z "$FILTERBY" ] && [ -z "$FILTERALT" ]; then
 	exit 1
 fi
 
+USER_FILTER=""
 if command -v loginctl >/dev/null 2>&1; then
-    session_id=$(loginctl show-seat seat0 -p ActiveSession --value)
-    user_id=$(loginctl show-session "$session_id" -p User --value)
-    IS_RUNNING=$(pgrep -u "$user_id" -o -a -f "$COMMAND" | grep -v "$CURRENT_SCRIPT_NAME")
-else
-    IS_RUNNING=$(pgrep -o -a -f "$COMMAND" | grep -v "$CURRENT_SCRIPT_NAME")
+   session_id=$(loginctl show-seat seat0 -p ActiveSession --value)
+   user_id=$(loginctl show-session "$session_id" -p User --value)
+   USER_FILTER="-u $user_id"
 fi
+
+# shellcheck disable=SC2086
+IS_RUNNING=$(pgrep $USER_FILTER -o -a -f "$COMMAND" | grep -v "$CURRENT_SCRIPT_NAME")
 
 if [ -n "$IS_RUNNING" ] || [ -n "$FILTERALT" ]; then
 	# trying for XDG_CONFIG_HOME first
