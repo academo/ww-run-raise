@@ -1,6 +1,4 @@
 #!/bin/bash
-# Usage: ww -f "window class filter" -c "run if not found"
-# Usage: ww -fa "window title filter" -c "run if not found"
 
 TOGGLE="false"
 POSITIONAL=()
@@ -15,6 +13,11 @@ while [[ $# -gt 0 ]]; do
 		;;
 	-f | --filter)
 		FILTERBY="$2"
+		shift # past argument
+		shift # past value
+		;;
+	-p | --process)
+		PROCESS="$2"
 		shift # past argument
 		shift # past value
 		;;
@@ -39,6 +42,10 @@ while [[ $# -gt 0 ]]; do
 	esac
 done
 
+if [ -z "$PROCESS" ]; then
+	PROCESS=$COMMAND
+fi
+
 set -- "${POSITIONAL[@]}" # restore positional parameters
 
 if [ -n "$HELP" ]; then
@@ -52,6 +59,7 @@ Paramaters:
 -fa --filter-alternative  filter by window title (caption)
 -t  --toggle              also minimize the window if it is already active
 -c  --command             command to check if running and run if no process is found
+-p --process overide the process name used when checking if running, defaults to --command
 EOF
 	exit 0
 fi
@@ -131,7 +139,7 @@ if command -v loginctl >/dev/null 2>&1; then
 fi
 
 # shellcheck disable=SC2086
-IS_RUNNING=$(pgrep $USER_FILTER -o -a -f "$COMMAND" | grep -v "$CURRENT_SCRIPT_NAME")
+IS_RUNNING=$(pgrep $USER_FILTER -o -a -f "$PROCESS" | grep -v "$CURRENT_SCRIPT_NAME")
 
 if [ -n "$IS_RUNNING" ] || [ -n "$FILTERALT" ]; then
 	# trying for XDG_CONFIG_HOME first
