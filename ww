@@ -1,8 +1,4 @@
 #!/bin/bash
-# Usage: ww -f "window class filter" -c "run if not found"
-# Usage: ww -fa "window title filter" -c "run if not found"
-# Usage: ww -ia
-# Usage: (other ones, please see the help of this script)
 
 TOGGLE="false"
 POSITIONAL=()
@@ -17,6 +13,11 @@ while [[ $# -gt 0 ]]; do
 		;;
 	-f | --filter)
 		FILTERBY="$2"
+		shift # past argument
+		shift # past value
+		;;
+	-p | --process)
+		PROCESS="$2"
 		shift # past argument
 		shift # past value
 		;;
@@ -45,6 +46,10 @@ while [[ $# -gt 0 ]]; do
 	esac
 done
 
+if [ -z "$PROCESS" ]; then
+	PROCESS=$COMMAND
+fi
+
 set -- "${POSITIONAL[@]}" # restore positional parameters
 
 if [ -n "$HELP" ]; then
@@ -62,6 +67,7 @@ Parameters:
 -fa --filter-alternative  filter by window title (caption)
 -t  --toggle              also minimize the window if it is already active
 -c  --command             command to check if running and run if no process is found
+-p --process overide the process name used when checking if running, defaults to --command
 EOF
 	exit 0
 fi
@@ -102,23 +108,45 @@ fi
 SCRIPT_TEMPLATE=$(
 	cat <<EOF
 function kwinactivateclient(clientClass, clientCaption, toggle) {
-  var clients = workspace.clientList();
-  var compareToCaption = new RegExp(clientCaption || '', 'i');
-  var compareToClass = clientClass;
-  var isCompareToClass = clientClass.length > 0
-  for (var i=0; i<clients.length; i++) {
-      var client = clients[i];
-      var classCompare = (isCompareToClass && client.resourceClass == compareToClass)
-      var captionCompare = (!isCompareToClass && compareToCaption.exec(client.caption))
-      if (classCompare || captionCompare) {
-          if (workspace.activeClient != client) {
-              workspace.activeClient = client;
-          } else if (toggle) {
-              client.minimized = true;
-          }
-          break;
-      }
-  }
+    var clients = workspace.clientList ? workspace.clientList() : workspace.windowList();
+    var activeWindow = workspace.activeClient || workspace.activeWindow;
+    var compareToCaption = new RegExp(clientCaption || '', 'i');
+    var compareToClass = clientClass;
+    var isCompareToClass = clientClass.length > 0;
+    var matchingClients = [];
+
+    for (var i = 0; i < clients.length; i++) {
+        var client = clients[i];
+        var classCompare = (isCompareToClass && client.resourceClass == compareToClass);
+        var captionCompare = (!isCompareToClass && compareToCaption.exec(client.caption));
+        if (classCompare || captionCompare) {
+            matchingClients.push(client);
+        }
+    }
+
+    if (matchingClients.length === 1) {
+        var client = matchingClients[0];
+        if (activeWindow !== client) {
+            setActiveClient(client);
+        } else if (toggle) {
+            client.minimized = !client.minimized;
+        }
+    } else if (matchingClients.length > 1) {
+
+        matchingClients.sort(function (a, b) {
+            return a.stackingOrder - b.stackingOrder;
+        });
+        const client = matchingClients[0];
+        setActiveClient(client);
+    }
+}
+
+function setActiveClient(client){
+    if (workspace.activeClient !== undefined) {
+        workspace.activeClient = client;
+    } else {
+        workspace.activeWindow = client;
+    }
 }
 kwinactivateclient('CLASS_NAME', 'CAPTION_NAME', TOGGLE);
 EOF
@@ -135,11 +163,6 @@ function ensure_script {
 		SCRIPT_CONTENT=${SCRIPT_TEMPLATE/CLASS_NAME/$1}
 		SCRIPT_CONTENT=${SCRIPT_CONTENT/CAPTION_NAME/$2}
         SCRIPT_CONTENT=${SCRIPT_CONTENT/TOGGLE/$3}
-		#if [ "$1" == "class" ]; then
-		#SCRIPT_CONTENT=${SCRIPT_CLASS_NAME/REPLACE_ME/$2}
-		#else
-		#SCRIPT_CONTENT=${SCRIPT_CAPTION/REPLACE_ME/$2}
-		#fi
 		echo "$SCRIPT_CONTENT" >"$SCRIPT_PATH"
 	fi
 }
@@ -149,10 +172,17 @@ if [ -z "$FILTERBY" ] && [ -z "$FILTERALT" ]; then
 	exit 1
 fi
 
-IS_RUNNING=$(pgrep -o -a -f "$COMMAND" | grep -v "$CURRENT_SCRIPT_NAME")
+USER_FILTER=""
+if command -v loginctl >/dev/null 2>&1; then
+   session_id=$(loginctl show-seat seat0 -p ActiveSession --value)
+   user_id=$(loginctl show-session "$session_id" -p User --value)
+   USER_FILTER="-u $user_id"
+fi
+
+# shellcheck disable=SC2086
+IS_RUNNING=$(pgrep $USER_FILTER -o -a -f "$PROCESS" | grep -v "$CURRENT_SCRIPT_NAME")
 
 if [ -n "$IS_RUNNING" ] || [ -n "$FILTERALT" ]; then
-
 	# trying for XDG_CONFIG_HOME first
 	SCRIPT_FOLDER_ROOT=$XDG_CONFIG_HOME
 	if [[ -z $SCRIPT_FOLDER_ROOT ]]; then
@@ -166,18 +196,24 @@ if [ -n "$IS_RUNNING" ] || [ -n "$FILTERALT" ]; then
 	ensure_script "$FILTERBY" "$FILTERALT" "$TOGGLE"
 
 	SCRIPT_NAME="ww$RANDOM"
-	#SCRIPT_NAME=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)
 
-	# install the script
 	ID=$(dbus-send --session --dest=org.kde.KWin --print-reply=literal /Scripting org.kde.kwin.Scripting.loadScript "string:$SCRIPT_PATH" "string:$SCRIPT_NAME" | awk '{print $2}')
-	# run it - some KDEs version use Script.run others Scripting.run
-	dbus-send --session --dest=org.kde.KWin --print-reply=literal "/$ID" org.kde.kwin.Scripting.run >/dev/null 2>&1
-	dbus-send --session --dest=org.kde.KWin --print-reply=literal "/$ID" org.kde.kwin.Script.run >/dev/null 2>&1
-	# stop it - some KDEs version use Script.run others Scripting.run
-	dbus-send --session --dest=org.kde.KWin --print-reply=literal "/$ID" org.kde.kwin.Scripting.stop >/dev/null 2>&1
-	dbus-send --session --dest=org.kde.KWin --print-reply=literal "/$ID" org.kde.kwin.Script.stop >/dev/null 2>&1
-	# uninstall it
-	dbus-send --session --dest=org.kde.KWin --print-reply=literal /Scripting org.kde.kwin.Scripting.unloadScript "string:$SCRIPT_NAME" >/dev/null 2>&1
+
+	# Try legacy first (kde <= 5) and then new (kde >= 6)
+	if dbus-send --session --dest=org.kde.KWin --print-reply=literal "/$ID" org.kde.kwin.Scripting.run 2>/dev/null; then
+    	SCRIPT_PATH="/$ID"
+	else
+    	SCRIPT_PATH="/Scripting/Script$ID"
+	fi
+
+	# Run using detected path
+	dbus-send --session --dest=org.kde.KWin --print-reply=literal "$SCRIPT_PATH" org.kde.kwin.Scripting.run >/dev/null 2>&1
+	dbus-send --session --dest=org.kde.KWin --print-reply=literal "$SCRIPT_PATH" org.kde.kwin.Script.run >/dev/null 2>&1
+
+	# Stop using same path
+	dbus-send --session --dest=org.kde.KWin --print-reply=literal "$SCRIPT_PATH" org.kde.kwin.Scripting.stop >/dev/null 2>&1
+	dbus-send --session --dest=org.kde.KWin --print-reply=literal "$SCRIPT_PATH" org.kde.kwin.Script.stop >/dev/null 2>&1
+
 elif [ -n "$COMMAND" ]; then
 	$COMMAND &
 fi

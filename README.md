@@ -1,9 +1,16 @@
-ww. Utility to raise or jump an applications in KDE. It interacts with KWin using KWin scripts and it is compatible with X11 and Wayland. It also works with multiple screens. It is intended as a wmctrl alternative (only for the raising windows part) compatible with wayland.
+ww. Utility to raise or jump an applications in KDE.
+
+It interacts with KWin using KWin scripts and it is compatible with X11 and Wayland. It also works with multiple screens.
+
+It is intended as a wmctrl alternative (only for the raising windows part)
+
+- Compatible with KDE 5.x and 6.x
+- Compatible with Wayland and X11
 
 # Installing
 
-* Download ww from this repository
-* Copy `ww` into your path. e.g.:
+- Download ww from this repository
+- Copy `ww` into your path. e.g.:
 
 ```bash
 cp ww /usr/local/bin
@@ -33,6 +40,7 @@ If you want to raise any window that matches a title. JS regexp allowed:
 `ww -fa 'Zoom meeting'`
 
 ## Paramaters:
+
 ```
 -h  --help                show this help
 -f  --filter              filter by window class
@@ -45,7 +53,6 @@ If you want to raise any window that matches a title. JS regexp allowed:
 You can use KDE custom shortcuts to add a custom shortcut that calls ww
 
 ![image](https://user-images.githubusercontent.com/227916/126187702-90105aff-32a4-48dd-95c9-a7c1a2623c9e.png)
-
 
 # How does it work?
 
@@ -62,7 +69,8 @@ Then ww creates a file inside `~/.wwscripts` to store a temporary kwin script, i
 The kwin script is targeted to find and focus a specific window.
 
 # TODO
+
 Here some ideas of improvements that I'd like to explore, but my knowledge on kwin scripts doesn't allow me:
 
-* Do not depend on pgrep to detect if an application is open?
-* Use a single kwin script with signals instead of loading and running one each time?
+- Do not depend on pgrep to detect if an application is open?
+- Use a single kwin script with signals instead of loading and running one each time?
