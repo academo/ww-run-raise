@@ -30,15 +30,20 @@ while [[ $# -gt 0 ]]; do
 		TOGGLE="true"
 		shift # past argument
 		;;
+	-ia | --info-active)
+		INFO_ACTIVE="1"
+		shift # past argument
+		;;			
+	-u | --current-user)
+		USER="$2"
+		shift # past argument
+		shift # past value
+		;;
 	-h | --help)
 		HELP="1"
 		shift # past argument
 		shift # past value
 		;;
-	-ia | --info-active)
-		INFO_ACTIVE="1"
-		shift # past argument
-		;;			
 	*)                  # unknown option
 		POSITIONAL+=("$1") # save it in an array for later
 		shift              # past argument
@@ -68,6 +73,7 @@ Parameters:
 -t  --toggle              also minimize the window if it is already active
 -c  --command             command to check if running and run if no process is found
 -p --process overide the process name used when checking if running, defaults to --command
+-u --current-user         will only search processes of the current user. requires loginctl
 EOF
 	exit 0
 fi
@@ -173,10 +179,12 @@ if [ -z "$FILTERBY" ] && [ -z "$FILTERALT" ]; then
 fi
 
 USER_FILTER=""
-if command -v loginctl >/dev/null 2>&1; then
-   session_id=$(loginctl show-seat seat0 -p ActiveSession --value)
-   user_id=$(loginctl show-session "$session_id" -p User --value)
-   USER_FILTER="-u $user_id"
+if [ -n "$USER" ] && command -v loginctl >/dev/null 2>&1; then
+	if command -v loginctl >/dev/null 2>&1; then
+   	session_id=$(loginctl show-seat seat0 -p ActiveSession --value)
+   	user_id=$(loginctl show-session "$session_id" -p User --value)
+   	USER_FILTER="-u $user_id"
+	fi
 fi
 
 # shellcheck disable=SC2086
