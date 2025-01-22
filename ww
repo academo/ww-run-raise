@@ -187,9 +187,8 @@ if [ -n "$CURRENTUSERONLY" ] && command -v loginctl >/dev/null 2>&1; then
 	fi
 fi
 
-
 # shellcheck disable=SC2086
-IS_RUNNING=$(pgrep $USER_FILTER -o -a -f "$PROCESS" | grep -v "$CURRENT_SCRIPT_NAME")
+IS_RUNNING=$(pgrep -o -a -f "$PROCESS")
 
 
 if [ -n "$IS_RUNNING" ] || [ -n "$FILTERALT" ]; then
