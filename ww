@@ -179,8 +179,13 @@ if command -v loginctl >/dev/null 2>&1; then
    USER_FILTER="-u $user_id"
 fi
 
+echo "USER_FILTER: $USER_FILTER"
+echo "PROCESS: $PROCESS"
+echo "CURRENT_SCRIPT_NAME: $CURRENT_SCRIPT_NAME"
+
 # shellcheck disable=SC2086
-IS_RUNNING=$(pgrep $USER_FILTER -o -a -f "$PROCESS" | grep -v "$CURRENT_SCRIPT_NAME")
+IS_RUNNING=$(pgrep $USER_FILTER -o -a -f "$PROCESS")
+
 
 if [ -n "$IS_RUNNING" ] || [ -n "$FILTERALT" ]; then
 	# trying for XDG_CONFIG_HOME first
