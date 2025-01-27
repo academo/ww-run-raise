@@ -51,13 +51,13 @@ while [[ $# -gt 0 ]]; do
 	esac
 done
 
-if [ -z "$PROCESS" ]; then
+if [[ -z "$PROCESS" ]]; then
 	PROCESS=$COMMAND
 fi
 
 set -- "${POSITIONAL[@]}" # restore positional parameters
 
-if [ -n "$HELP" ]; then
+if [[ -n "$HELP" ]]; then
 	cat <<EOF
 ww. Utility to launch a window (or raise it, if it was minimized), or to show information about the active window, or to perform other operations with windows in KDE Plasma. It interacts with KWin using KWin scripts and it is compatible with X11 and Wayland.
 
@@ -78,7 +78,7 @@ EOF
 	exit 0
 fi
 
-if [ -n "$INFO_ACTIVE" ]; then
+if [[ -n "$INFO_ACTIVE" ]]; then
     kwinSupportInfo="$(qdbus org.kde.KWin /KWin supportInformation)" || exit 1
     kwinVersion="$(awk '/KWin version:/ {print $3}' <<< "$kwinSupportInfo")" || exit 1
     kwinMajorVersion="$(awk -F"." '{print $1}' <<< "$kwinVersion")" || exit 1    
@@ -158,12 +158,10 @@ kwinactivateclient('CLASS_NAME', 'CAPTION_NAME', TOGGLE);
 EOF
 )
 
-CURRENT_SCRIPT_NAME=$(basename "$0")
-
 # ensure the script file exists
 function ensure_script {
-	if [ ! -f SCRIPT_PATH ]; then
-		if [ ! -d "$SCRIPT_FOLDER" ]; then
+	if [[ ! -f SCRIPT_PATH ]]; then
+		if [[ ! -d "$SCRIPT_FOLDER" ]]; then
 			mkdir -p "$SCRIPT_FOLDER"
 		fi
 		SCRIPT_CONTENT=${SCRIPT_TEMPLATE/CLASS_NAME/$1}
@@ -173,13 +171,13 @@ function ensure_script {
 	fi
 }
 
-if [ -z "$FILTERBY" ] && [ -z "$FILTERALT" ]; then
+if [[ -z "$FILTERBY" && -z "$FILTERALT" ]]; then
 	echo "If you want that this program find a window, you need to specify a window filter — either by class (\`-f\`) or by title (\`-fa\`). More information can be seen if this script is called using the \`--help\` parameter."
 	exit 1
 fi
 
 USER_FILTER=""
-if [ -n "$CURRENTUSERONLY" ] && command -v loginctl >/dev/null 2>&1; then
+if [[ -n "$CURRENTUSERONLY" ]] && command -v loginctl >/dev/null 2>&1; then
 	if command -v loginctl >/dev/null 2>&1; then
    	session_id=$(loginctl show-seat seat0 -p ActiveSession --value)
    	user_id=$(loginctl show-session "$session_id" -p User --value)
@@ -187,12 +185,13 @@ if [ -n "$CURRENTUSERONLY" ] && command -v loginctl >/dev/null 2>&1; then
 	fi
 fi
 
+# Note: In this case, `$USER_FILTER` must not have quotes around it.
 # shellcheck disable=SC2086
-IS_RUNNING=$(pgrep -o -a -f "$PROCESS")
+IS_RUNNING=$(pgrep $USER_FILTER -o -a -f "$PROCESS")
 
-
-if [ -n "$IS_RUNNING" ] || [ -n "$FILTERALT" ]; then
-	# trying for XDG_CONFIG_HOME first
+if [[ -n "$IS_RUNNING" || -n "$FILTERALT" ]]; then
+	# trying for XDG_CONFIG_HOME first.
+	# shellcheck disable=SC2154
 	SCRIPT_FOLDER_ROOT=$XDG_CONFIG_HOME
 	if [[ -z $SCRIPT_FOLDER_ROOT ]]; then
 		# fallback to the home folder
@@ -200,13 +199,18 @@ if [ -n "$IS_RUNNING" ] || [ -n "$FILTERALT" ]; then
 	fi
 
 	SCRIPT_FOLDER="$SCRIPT_FOLDER_ROOT/.wwscripts/"
-	SCRIPT_NAME=$(echo "$FILTERBY$FILTERALT" | md5sum | head -c 32)
+	# Uses `md5sum` separately in order to avoid masking a return value, as Shellcheck recommends
+	INFO_MD5SUM=$(md5sum <<< "$FILTERBY$FILTERALT") || exit 1
+	# Ensures that the script file exists
+	SCRIPT_NAME=$(head -c 32 <<< "$INFO_MD5SUM") || exit 1
 	SCRIPT_PATH="$SCRIPT_FOLDER$SCRIPT_NAME"
 	ensure_script "$FILTERBY" "$FILTERALT" "$TOGGLE"
 
 	SCRIPT_NAME="ww$RANDOM"
 
-	ID=$(dbus-send --session --dest=org.kde.KWin --print-reply=literal /Scripting org.kde.kwin.Scripting.loadScript "string:$SCRIPT_PATH" "string:$SCRIPT_NAME" | awk '{print $2}')
+	INFO_DBUS_SEND=$(dbus-send --session --dest=org.kde.KWin --print-reply=literal /Scripting org.kde.kwin.Scripting.loadScript "string:$SCRIPT_PATH" "string:$SCRIPT_NAME") || exit 1
+	# Uses `awk` separately in order to avoid masking a return value, as Shellcheck recommends
+	ID=$(awk '{print $2}' <<< "$INFO_DBUS_SEND") || exit 1
 
 	# Try legacy first (kde <= 5) and then new (kde >= 6)
 	if dbus-send --session --dest=org.kde.KWin --print-reply=literal "/$ID" org.kde.kwin.Scripting.run 2>/dev/null; then
@@ -223,6 +227,6 @@ if [ -n "$IS_RUNNING" ] || [ -n "$FILTERALT" ]; then
 	dbus-send --session --dest=org.kde.KWin --print-reply=literal "$SCRIPT_PATH" org.kde.kwin.Scripting.stop >/dev/null 2>&1
 	dbus-send --session --dest=org.kde.KWin --print-reply=literal "$SCRIPT_PATH" org.kde.kwin.Script.stop >/dev/null 2>&1
 
-elif [ -n "$COMMAND" ]; then
+elif [[ -n "$COMMAND" ]]; then
 	$COMMAND &
 fi
