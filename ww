@@ -187,7 +187,7 @@ fi
 
 # Note: In this case, `$USER_FILTER` must not have quotes around it.
 # shellcheck disable=SC2086
-IS_RUNNING=$(pgrep $USER_FILTER -o -a -f "$PROCESS")
+IS_RUNNING=$(pgrep $USER_FILTER -o -a -f "$PROCESS" --ignore-ancestors)
 
 if [[ -n "$IS_RUNNING" || -n "$FILTERALT" ]]; then
 	# trying for XDG_CONFIG_HOME first.
