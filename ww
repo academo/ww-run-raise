@@ -35,9 +35,8 @@ while [[ $# -gt 0 ]]; do
 		shift # past argument
 		;;			
 	-u | --current-user)
-		CURRENTUSERONLY="$2"
+		CURRENTUSERONLY="true"
 		shift # past argument
-		shift # past value
 		;;
 	-h | --help)
 		HELP="1"
