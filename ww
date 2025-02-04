@@ -227,21 +227,21 @@ if [[ -n "$IS_RUNNING" || -n "$FILTERALT" ]]; then
 	kwinVersion=$(kwin --version | cut -d ' ' -f2)
 
 	if ver_between 5.21.90 "$kwinVersion" 5.27.79; then
-		SCRIPT_RUN_PATH=org.kde.kwin.Script.run
+		SCRIPT_API_PATH=org.kde.kwin.Script
 		SCRIPT_PATH="/$ID"
 	elif ver_lt 5.27.80 "$kwinVersion"; then
-		SCRIPT_RUN_PATH=org.kde.kwin.Script.run
+		SCRIPT_API_PATH=org.kde.kwin.Script
 		SCRIPT_PATH="/Scripting/Script$ID"
 	else
-		SCRIPT_RUN_PATH=org.kde.kwin.Scripting.run
+		SCRIPT_API_PATH=org.kde.kwin.Scripting
 		SCRIPT_PATH="/$ID"
 	fi
 
 	# Run using detected pat
-	dbus-send --session --dest=org.kde.KWin --print-reply=literal "$SCRIPT_PATH" $SCRIPT_RUN_PATH >/dev/null 2>&1
+	dbus-send --session --dest=org.kde.KWin --print-reply=literal "$SCRIPT_PATH" $SCRIPT_API_PATH.run >/dev/null 2>&1
 
 	# Stop using same path
-	dbus-send --session --dest=org.kde.KWin --print-reply=literal "$SCRIPT_PATH" $SCRIPT_RUN_PATH >/dev/null 2>&1
+	dbus-send --session --dest=org.kde.KWin --print-reply=literal "$SCRIPT_PATH" $SCRIPT_API_PATH.stop >/dev/null 2>&1
 
 elif [[ -n "$COMMAND" ]]; then
 	$COMMAND &
