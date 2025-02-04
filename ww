@@ -77,9 +77,14 @@ EOF
 	exit 0
 fi
 
-if [[ -n "$INFO_ACTIVE" ]]; then
+function get_kwin_version() {
     kwinSupportInfo="$(qdbus org.kde.KWin /KWin supportInformation)" || exit 1
     kwinVersion="$(awk '/KWin version:/ {print $3}' <<< "$kwinSupportInfo")" || exit 1
+    echo "$kwinVersion"
+}
+
+if [[ -n "$INFO_ACTIVE" ]]; then
+    kwinVersion=$(get_kwin_version)
     kwinMajorVersion="$(awk -F"." '{print $1}' <<< "$kwinVersion")" || exit 1    
     # This feature needs at least this KWin version
     readonly minimumVersion=6 || exit 1
@@ -224,7 +229,7 @@ if [[ -n "$IS_RUNNING" || -n "$FILTERALT" ]]; then
 
 	# Use kwin version to decide how to call the script run api which changes between kwin versions.
 	# See https://github.com/academo/ww-run-raise/issues/15#issuecomment-2632214974 for more info.
-	kwinVersion=$(kwin --version | cut -d ' ' -f2)
+	kwinVersion=$(get_kwin_version)
 
 	if ver_between 5.21.90 "$kwinVersion" 5.27.79; then
 		SCRIPT_API_PATH=org.kde.kwin.Script
@@ -238,10 +243,10 @@ if [[ -n "$IS_RUNNING" || -n "$FILTERALT" ]]; then
 	fi
 
 	# Run using detected pat
-	dbus-send --session --dest=org.kde.KWin --print-reply=literal "$SCRIPT_PATH" $SCRIPT_API_PATH.run >/dev/null 2>&1
+	dbus-send --session --dest=org.kde.KWin --print-reply=literal "$SCRIPT_PATH" ${SCRIPT_API_PATH}.run >/dev/null 2>&1
 
 	# Stop using same path
-	dbus-send --session --dest=org.kde.KWin --print-reply=literal "$SCRIPT_PATH" $SCRIPT_API_PATH.stop >/dev/null 2>&1
+	dbus-send --session --dest=org.kde.KWin --print-reply=literal "$SCRIPT_PATH" ${SCRIPT_API_PATH}.stop >/dev/null 2>&1
 
 elif [[ -n "$COMMAND" ]]; then
 	$COMMAND &
