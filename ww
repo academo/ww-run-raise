@@ -77,9 +77,14 @@ EOF
 	exit 0
 fi
 
-if [[ -n "$INFO_ACTIVE" ]]; then
+function get_kwin_version() {
     kwinSupportInfo="$(qdbus org.kde.KWin /KWin supportInformation)" || exit 1
     kwinVersion="$(awk '/KWin version:/ {print $3}' <<< "$kwinSupportInfo")" || exit 1
+    echo "$kwinVersion"
+}
+
+if [[ -n "$INFO_ACTIVE" ]]; then
+    kwinVersion=$(get_kwin_version)
     kwinMajorVersion="$(awk -F"." '{print $1}' <<< "$kwinVersion")" || exit 1    
     # This feature needs at least this KWin version
     readonly minimumVersion=6 || exit 1
@@ -170,6 +175,17 @@ function ensure_script {
 	fi
 }
 
+# Check if a version string is between two inclusive versions.
+function ver_between() {
+    # args: min, actual, max
+    printf '%s\n' "$@" | sort -C -V
+}
+
+# Check if a version string is lower than another.
+function ver_lt() {
+    printf '%s\n' "$1" "$2" | sort -C -V
+}
+
 if [[ -z "$FILTERBY" && -z "$FILTERALT" ]]; then
 	echo "If you want that this program find a window, you need to specify a window filter — either by class (\`-f\`) or by title (\`-fa\`). More information can be seen if this script is called using the \`--help\` parameter."
 	exit 1
@@ -211,20 +227,26 @@ if [[ -n "$IS_RUNNING" || -n "$FILTERALT" ]]; then
 	# Uses `awk` separately in order to avoid masking a return value, as Shellcheck recommends
 	ID=$(awk '{print $2}' <<< "$INFO_DBUS_SEND") || exit 1
 
-	# Try legacy first (kde <= 5) and then new (kde >= 6)
-	if dbus-send --session --dest=org.kde.KWin --print-reply=literal "/$ID" org.kde.kwin.Scripting.run 2>/dev/null; then
-    	SCRIPT_PATH="/$ID"
+	# Use kwin version to decide how to call the script run api which changes between kwin versions.
+	# See https://github.com/academo/ww-run-raise/issues/15#issuecomment-2632214974 for more info.
+	kwinVersion=$(get_kwin_version)
+
+	if ver_between 5.21.90 "$kwinVersion" 5.27.79; then
+		SCRIPT_API_PATH=org.kde.kwin.Script
+		SCRIPT_PATH="/$ID"
+	elif ver_lt 5.27.80 "$kwinVersion"; then
+		SCRIPT_API_PATH=org.kde.kwin.Script
+		SCRIPT_PATH="/Scripting/Script$ID"
 	else
-    	SCRIPT_PATH="/Scripting/Script$ID"
+		SCRIPT_API_PATH=org.kde.kwin.Scripting
+		SCRIPT_PATH="/$ID"
 	fi
 
-	# Run using detected path
-	dbus-send --session --dest=org.kde.KWin --print-reply=literal "$SCRIPT_PATH" org.kde.kwin.Scripting.run >/dev/null 2>&1
-	dbus-send --session --dest=org.kde.KWin --print-reply=literal "$SCRIPT_PATH" org.kde.kwin.Script.run >/dev/null 2>&1
+	# Run using detected pat
+	dbus-send --session --dest=org.kde.KWin --print-reply=literal "$SCRIPT_PATH" ${SCRIPT_API_PATH}.run >/dev/null 2>&1
 
 	# Stop using same path
-	dbus-send --session --dest=org.kde.KWin --print-reply=literal "$SCRIPT_PATH" org.kde.kwin.Scripting.stop >/dev/null 2>&1
-	dbus-send --session --dest=org.kde.KWin --print-reply=literal "$SCRIPT_PATH" org.kde.kwin.Script.stop >/dev/null 2>&1
+	dbus-send --session --dest=org.kde.KWin --print-reply=literal "$SCRIPT_PATH" ${SCRIPT_API_PATH}.stop >/dev/null 2>&1
 
 elif [[ -n "$COMMAND" ]]; then
 	$COMMAND &
