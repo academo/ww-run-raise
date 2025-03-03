@@ -1,5 +1,21 @@
 #!/bin/bash
 
+# Determine which DBus tool to use
+USE_DBUS_SEND=false
+if command -v dbus-send >/dev/null 2>&1; then
+    if command -v qdbus >/dev/null 2>&1; then
+        # Prefer qdbus if both are available
+        USE_DBUS_SEND=false
+    else
+        USE_DBUS_SEND=true
+    fi
+elif command -v qdbus >/dev/null 2>&1; then
+    USE_DBUS_SEND=false
+else
+    echo "Error: Neither dbus-send nor qdbus found. Please install at least one of them." >&2
+    exit 1
+fi
+
 TOGGLE="false"
 POSITIONAL=()
 while [[ $# -gt 0 ]]; do
@@ -33,7 +49,7 @@ while [[ $# -gt 0 ]]; do
 	-ia | --info-active)
 		INFO_ACTIVE="1"
 		shift # past argument
-		;;			
+		;;
 	-u | --current-user)
 		CURRENTUSERONLY="true"
 		shift # past argument
@@ -64,7 +80,7 @@ Parameters:
 
 -h  --help                show this help
 -ia --info-active         show information about the active window. Using this parameter, this program can be periodically called from
-                          other programs, so the user is able to know how much time he/she spends using particular windows, or the user 
+                          other programs, so the user is able to know how much time he/she spends using particular windows, or the user
                           is able to stop (in order to save CPU use, bandwith or downloaded MBs) programs when they are not in the
                           foreground, etc.
 -f  --filter              filter by window class
@@ -78,86 +94,122 @@ EOF
 fi
 
 function get_kwin_version() {
-    kwinSupportInfo="$(qdbus org.kde.KWin /KWin supportInformation)" || exit 1
-    kwinVersion="$(awk '/KWin version:/ {print $3}' <<< "$kwinSupportInfo")" || exit 1
+    if [ "$USE_DBUS_SEND" = true ]; then
+        kwinSupportInfo=$(dbus-send --session --dest=org.kde.KWin --type=method_call --print-reply=literal /KWin org.kde.KWin.supportInformation | grep "KWin version:" | tr -s " ") || exit 1
+        kwinVersion=$(echo "$kwinSupportInfo" | awk '{print $3}') || exit 1
+    else
+        kwinSupportInfo="$(qdbus org.kde.KWin /KWin supportInformation)" || exit 1
+        kwinVersion="$(awk '/KWin version:/ {print $3}' <<< "$kwinSupportInfo")" || exit 1
+    fi
     echo "$kwinVersion"
 }
 
 if [[ -n "$INFO_ACTIVE" ]]; then
     kwinVersion=$(get_kwin_version)
-    kwinMajorVersion="$(awk -F"." '{print $1}' <<< "$kwinVersion")" || exit 1    
+    kwinMajorVersion="$(awk -F"." '{print $1}' <<< "$kwinVersion")" || exit 1
     # This feature needs at least this KWin version
     readonly minimumVersion=6 || exit 1
     if [[ "$kwinMajorVersion" -lt "$minimumVersion" ]]; then
-        echo "ERROR: This feature needs KWin $minimumVersion or later." >&2 
+        echo "ERROR: This feature needs KWin $minimumVersion or later." >&2
         exit 1
     fi
 
     # This way is similar to the one used on https://discuss.kde.org/t/xdotool-replacement-on-wayland/7242/9
     jsFile="$(mktemp)" || exit 1   # It is the file where the javascript code is going to be saved
     echo "print(\"$jsFile\",workspace.activeWindow.internalId);" > "$jsFile" || exit 1
-    
-    scriptId="$(qdbus org.kde.KWin /Scripting loadScript "$jsFile")" || exit 1
+
+    if [ "$USE_DBUS_SEND" = true ]; then
+        scriptId="$(dbus-send --session --dest=org.kde.KWin --print-reply=literal /Scripting org.kde.kwin.Scripting.loadScript string:"$jsFile" string:"info_script" | awk '{print $2}')" || exit 1
+    else
+        scriptId="$(qdbus org.kde.KWin /Scripting loadScript "$jsFile")" || exit 1
+    fi
+
     timestamp="$(date +"%Y-%m-%d %H:%M:%S")" || exit 1
-    # Starts the script
-    qdbus org.kde.KWin /Scripting/Script"$scriptId" run || exit 1
     
+    # Starts the script
+    if [ "$USE_DBUS_SEND" = true ]; then
+        dbus-send --session --dest=org.kde.KWin --print-reply=literal /Scripting/Script"$scriptId" org.kde.kwin.Script.run || exit 1
+    else
+        qdbus org.kde.KWin /Scripting/Script"$scriptId" run || exit 1
+    fi
+
     # Uses some arguments that are also seen on https://github.com/jinliu/kdotool/blob/master/src/main.rs
     outputJournalctl="$(journalctl --since "$timestamp" --user --user-unit=plasma-kwin_wayland.service --user-unit=plasma-kwin_x11.service --output=cat -g "js: $jsFile")" || exit 1
     # Uses `awk` separately in order to avoid masking a return value, as Shellcheck recommends
     windowId="$(awk '{print $3}' <<< "$outputJournalctl")" || exit 1
+    
     # Stops the script
-    qdbus org.kde.KWin /Scripting/Script"$scriptId" stop || exit 1
-    
+    if [ "$USE_DBUS_SEND" = true ]; then
+        dbus-send --session --dest=org.kde.KWin --print-reply=literal /Scripting/Script"$scriptId" org.kde.kwin.Script.stop || exit 1
+    else
+        qdbus org.kde.KWin /Scripting/Script"$scriptId" stop || exit 1
+    fi
+
     # Shows the information about that window
-    qdbus org.kde.KWin /KWin org.kde.KWin.getWindowInfo "$windowId" || exit 1
-    
+    if [ "$USE_DBUS_SEND" = true ]; then
+        dbus-send --session --dest=org.kde.KWin --print-reply=literal /KWin org.kde.KWin.getWindowInfo uint32:"$windowId" || exit 1
+    else
+        qdbus org.kde.KWin /KWin org.kde.KWin.getWindowInfo "$windowId" || exit 1
+    fi
+
     exit 0
 fi
 
 SCRIPT_TEMPLATE=$(
 	cat <<EOF
 function kwinactivateclient(clientClass, clientCaption, toggle) {
-    var clients = workspace.clientList ? workspace.clientList() : workspace.windowList();
-    var activeWindow = workspace.activeClient || workspace.activeWindow;
+    var clients = workspace.windowList();
+    var activeWindow = workspace.activeWindow;
     var compareToCaption = new RegExp(clientCaption || '', 'i');
-    var compareToClass = clientClass;
+    var compareToClass = clientClass.toLowerCase();
     var isCompareToClass = clientClass.length > 0;
     var matchingClients = [];
+    var lastActiveClient = null;
+    
+    var shouldToggle = String(toggle).toLowerCase() === "true";
 
     for (var i = 0; i < clients.length; i++) {
         var client = clients[i];
-        var classCompare = (isCompareToClass && client.resourceClass == compareToClass);
+        var clientClassLower = (client.resourceClass || '').toLowerCase();
+        var clientNameLower = (client.resourceName || '').toLowerCase();
+        var clientAppId = (client.desktopFileName || '').toLowerCase();
+        
+        var classCompare = isCompareToClass && (
+            clientClassLower === compareToClass || 
+            clientNameLower === compareToClass ||
+            clientAppId.includes(compareToClass)
+        );
         var captionCompare = (!isCompareToClass && compareToCaption.exec(client.caption));
+        
         if (classCompare || captionCompare) {
             matchingClients.push(client);
+            if (!lastActiveClient || client.stackingOrder > lastActiveClient.stackingOrder) {
+                lastActiveClient = client;
+            }
         }
     }
 
-    if (matchingClients.length === 1) {
-        var client = matchingClients[0];
+    if (matchingClients.length >= 1) {
+        var client = lastActiveClient || matchingClients[0];
         if (activeWindow !== client) {
-            setActiveClient(client);
-        } else if (toggle) {
+            if (client.minimized) {
+                client.minimized = false;
+            }
+            
+            workspace.activeWindow = client;
+            if (typeof workspace.activateWindow === "function") {
+                workspace.activateWindow(client);
+            }
+            
+            client.desktop = workspace.currentDesktop;
+            client.raise();
+            
+        } else if (shouldToggle) {
             client.minimized = !client.minimized;
         }
-    } else if (matchingClients.length > 1) {
-
-        matchingClients.sort(function (a, b) {
-            return a.stackingOrder - b.stackingOrder;
-        });
-        const client = matchingClients[0];
-        setActiveClient(client);
     }
 }
 
-function setActiveClient(client){
-    if (workspace.activeClient !== undefined) {
-        workspace.activeClient = client;
-    } else {
-        workspace.activeWindow = client;
-    }
-}
 kwinactivateclient('CLASS_NAME', 'CAPTION_NAME', TOGGLE);
 EOF
 )
@@ -202,7 +254,18 @@ fi
 
 # Note: In this case, `$USER_FILTER` must not have quotes around it.
 # shellcheck disable=SC2086
-IS_RUNNING=$(pgrep $USER_FILTER -o -a -f "$PROCESS" --ignore-ancestors)
+if [[ "$COMMAND" == "flatpak run"* ]]; then
+    # Extract the last part of the command for Flatpak applications
+    PROCESS_BASE=$(echo "$COMMAND" | awk '{print $NF}' | rev | cut -d. -f1 | rev)
+else
+    # Extrahiere den Basisnamen des Prozesses und berücksichtige Argumente
+    PROCESS_BASE=$(echo "$PROCESS" | cut -d' ' -f1)
+fi
+
+IS_RUNNING=""
+if [[ -n "$PROCESS_BASE" ]]; then
+    IS_RUNNING=$(pgrep $USER_FILTER -f "$PROCESS_BASE" --ignore-ancestors)
+fi
 
 if [[ -n "$IS_RUNNING" || -n "$FILTERALT" ]]; then
 	# trying for XDG_CONFIG_HOME first.
@@ -212,7 +275,6 @@ if [[ -n "$IS_RUNNING" || -n "$FILTERALT" ]]; then
 		# fallback to the home folder
 		SCRIPT_FOLDER_ROOT=$HOME
 	fi
-
 	SCRIPT_FOLDER="$SCRIPT_FOLDER_ROOT/.wwscripts/"
 	# Uses `md5sum` separately in order to avoid masking a return value, as Shellcheck recommends
 	INFO_MD5SUM=$(md5sum <<< "$FILTERBY$FILTERALT") || exit 1
@@ -223,9 +285,12 @@ if [[ -n "$IS_RUNNING" || -n "$FILTERALT" ]]; then
 
 	SCRIPT_NAME="ww$RANDOM"
 
-	INFO_DBUS_SEND=$(dbus-send --session --dest=org.kde.KWin --print-reply=literal /Scripting org.kde.kwin.Scripting.loadScript "string:$SCRIPT_PATH" "string:$SCRIPT_NAME") || exit 1
-	# Uses `awk` separately in order to avoid masking a return value, as Shellcheck recommends
-	ID=$(awk '{print $2}' <<< "$INFO_DBUS_SEND") || exit 1
+	if [ "$USE_DBUS_SEND" = true ]; then
+        INFO_DBUS_SEND=$(dbus-send --session --dest=org.kde.KWin --print-reply=literal /Scripting org.kde.kwin.Scripting.loadScript "string:$SCRIPT_PATH" "string:$SCRIPT_NAME") || exit 1
+        ID=$(awk '{print $2}' <<< "$INFO_DBUS_SEND") || exit 1
+    else
+        ID="$(qdbus org.kde.KWin /Scripting loadScript "$SCRIPT_PATH" "$SCRIPT_NAME")" || exit 1
+    fi
 
 	# Use kwin version to decide how to call the script run api which changes between kwin versions.
 	# See https://github.com/academo/ww-run-raise/issues/15#issuecomment-2632214974 for more info.
@@ -242,12 +307,23 @@ if [[ -n "$IS_RUNNING" || -n "$FILTERALT" ]]; then
 		SCRIPT_PATH="/$ID"
 	fi
 
-	# Run using detected pat
-	dbus-send --session --dest=org.kde.KWin --print-reply=literal "$SCRIPT_PATH" ${SCRIPT_API_PATH}.run >/dev/null 2>&1
+	# Run using detected path
+	if [ "$USE_DBUS_SEND" = true ]; then
+        dbus-send --session --dest=org.kde.KWin --print-reply=literal "$SCRIPT_PATH" ${SCRIPT_API_PATH}.run >/dev/null 2>&1
+    else
+        qdbus org.kde.KWin "$SCRIPT_PATH" run >/dev/null 2>&1
+    fi
 
 	# Stop using same path
-	dbus-send --session --dest=org.kde.KWin --print-reply=literal "$SCRIPT_PATH" ${SCRIPT_API_PATH}.stop >/dev/null 2>&1
+	if [ "$USE_DBUS_SEND" = true ]; then
+        dbus-send --session --dest=org.kde.KWin --print-reply=literal "$SCRIPT_PATH" ${SCRIPT_API_PATH}.stop >/dev/null 2>&1
+    else
+        qdbus org.kde.KWin "$SCRIPT_PATH" stop >/dev/null 2>&1
+    fi
 
-elif [[ -n "$COMMAND" ]]; then
-	$COMMAND &
+fi
+
+# Start the program if it's not running and we have a command
+if [[ -z "$IS_RUNNING" && -n "$COMMAND" ]]; then
+    eval "$COMMAND" &
 fi
