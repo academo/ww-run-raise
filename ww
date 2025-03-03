@@ -252,16 +252,16 @@ if [[ -n "$CURRENTUSERONLY" ]] && command -v loginctl >/dev/null 2>&1; then
 	fi
 fi
 
-# Note: In this case, `$USER_FILTER` must not have quotes around it.
-# shellcheck disable=SC2086
+# Flatpak support
 if [[ "$COMMAND" == "flatpak run"* ]]; then
     # Extract the last part of the command for Flatpak applications
     PROCESS_BASE=$(echo "$COMMAND" | awk '{print $NF}' | rev | cut -d. -f1 | rev)
 else
-    # Extrahiere den Basisnamen des Prozesses und berücksichtige Argumente
     PROCESS_BASE=$(echo "$PROCESS" | cut -d' ' -f1)
 fi
 
+# Note: In this case, `$USER_FILTER` must not have quotes around it.
+# shellcheck disable=SC2086
 IS_RUNNING=""
 if [[ -n "$PROCESS_BASE" ]]; then
     IS_RUNNING=$(pgrep $USER_FILTER -f "$PROCESS_BASE" --ignore-ancestors)
