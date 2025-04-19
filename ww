@@ -77,8 +77,12 @@ EOF
 	exit 0
 fi
 
+dbus_kwin () {
+    dbus-send --session --dest=org.kde.KWin --print-reply=literal "$@"
+}
+
 function get_kwin_version() {
-    kwinSupportInfo="$(qdbus org.kde.KWin /KWin supportInformation)" || exit 1
+    kwinSupportInfo="$(dbus_kwin /KWin org.kde.KWin.supportInformation)" || exit 1
     kwinVersion="$(awk '/KWin version:/ {print $3}' <<< "$kwinSupportInfo")" || exit 1
     echo "$kwinVersion"
 }
@@ -97,17 +101,18 @@ if [[ -n "$INFO_ACTIVE" ]]; then
     jsFile="$(mktemp)" || exit 1   # It is the file where the javascript code is going to be saved
     echo "print(\"$jsFile\",workspace.activeWindow.internalId);" > "$jsFile" || exit 1
     
-    scriptId="$(qdbus org.kde.KWin /Scripting loadScript "$jsFile")" || exit 1
+    scriptId_response="$(dbus_kwin /Scripting org.kde.kwin.Scripting.loadScript "string:$jsFile")" || exit 1
+    scriptId=$(awk '{print $2}' <<< "$scriptId_response") || exit 1
     timestamp="$(date +"%Y-%m-%d %H:%M:%S")" || exit 1
     # Starts the script
-    qdbus org.kde.KWin /Scripting/Script"$scriptId" run || exit 1
+    dbus_kwin "/Scripting/Script$scriptId" org.kde.kwin.Script.run || exit 1
     
     # Uses some arguments that are also seen on https://github.com/jinliu/kdotool/blob/master/src/main.rs
     outputJournalctl="$(journalctl --since "$timestamp" --user --user-unit=plasma-kwin_wayland.service --user-unit=plasma-kwin_x11.service --output=cat -g "js: $jsFile")" || exit 1
     # Uses `awk` separately in order to avoid masking a return value, as Shellcheck recommends
     windowId="$(awk '{print $3}' <<< "$outputJournalctl")" || exit 1
     # Stops the script
-    qdbus org.kde.KWin /Scripting/Script"$scriptId" stop || exit 1
+    dbus_kwin "/Scripting/Script$scriptId" org.kde.kwin.Script.stop || exit 1
     
     # Shows the information about that window
     qdbus org.kde.KWin /KWin org.kde.KWin.getWindowInfo "$windowId" || exit 1
@@ -223,7 +228,7 @@ if [[ -n "$IS_RUNNING" || -n "$FILTERALT" ]]; then
 
 	SCRIPT_NAME="ww$RANDOM"
 
-	INFO_DBUS_SEND=$(dbus-send --session --dest=org.kde.KWin --print-reply=literal /Scripting org.kde.kwin.Scripting.loadScript "string:$SCRIPT_PATH" "string:$SCRIPT_NAME") || exit 1
+	INFO_DBUS_SEND=$(dbus_kwin /Scripting org.kde.kwin.Scripting.loadScript "string:$SCRIPT_PATH" "string:$SCRIPT_NAME") || exit 1
 	# Uses `awk` separately in order to avoid masking a return value, as Shellcheck recommends
 	ID=$(awk '{print $2}' <<< "$INFO_DBUS_SEND") || exit 1
 
@@ -243,10 +248,10 @@ if [[ -n "$IS_RUNNING" || -n "$FILTERALT" ]]; then
 	fi
 
 	# Run using detected pat
-	dbus-send --session --dest=org.kde.KWin --print-reply=literal "$SCRIPT_PATH" ${SCRIPT_API_PATH}.run >/dev/null 2>&1
+	dbus_kwin "$SCRIPT_PATH" ${SCRIPT_API_PATH}.run >/dev/null 2>&1
 
 	# Stop using same path
-	dbus-send --session --dest=org.kde.KWin --print-reply=literal "$SCRIPT_PATH" ${SCRIPT_API_PATH}.stop >/dev/null 2>&1
+	dbus_kwin "$SCRIPT_PATH" ${SCRIPT_API_PATH}.stop >/dev/null 2>&1
 
 elif [[ -n "$COMMAND" ]]; then
 	$COMMAND &
