@@ -114,8 +114,18 @@ if [[ -n "$INFO_ACTIVE" ]]; then
     # Stops the script
     dbus_kwin "/Scripting/Script$scriptId" org.kde.kwin.Script.stop || exit 1
     
+    if command -v qdbus 2>&1 >/dev/null; then
+        qdbus_bin=qdbus
+    elif command -v qdbus6 2>&1 >/dev/null; then
+        # On Arch some users might only have qt6-tools installed
+        qdbus_bin=qdbus6
+    else
+        echo "'qdbus' or 'qdbus6' command not found, aborting."
+        exit 1
+    fi
+
     # Shows the information about that window
-    qdbus org.kde.KWin /KWin org.kde.KWin.getWindowInfo "$windowId" || exit 1
+    $qdbus_bin org.kde.KWin /KWin org.kde.KWin.getWindowInfo "$windowId" || exit 1
     
     exit 0
 fi
