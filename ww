@@ -219,7 +219,7 @@ fi
 # shellcheck disable=SC2086
 IS_RUNNING=$(pgrep $USER_FILTER -o -a -f "$PROCESS" --ignore-ancestors)
 
-if [[ -n "$IS_RUNNING" || -n "$FILTERALT" ]]; then
+if [[ -n "$IS_RUNNING" ]]; then
 	# trying for XDG_CONFIG_HOME first.
 	# shellcheck disable=SC2154
 	SCRIPT_FOLDER_ROOT=$XDG_CONFIG_HOME
