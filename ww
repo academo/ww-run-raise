@@ -26,6 +26,11 @@ while [[ $# -gt 0 ]]; do
 		shift # past argument
 		shift # past value
 		;;
+	-fr | --filter-regex)
+		FILTERREGEX="$2"
+		shift # past argument
+		shift # past value
+		;;
 	-t | --toggle)
 		TOGGLE="true"
 		shift # past argument
@@ -67,11 +72,12 @@ Parameters:
                           other programs, so the user is able to know how much time he/she spends using particular windows, or the user 
                           is able to stop (in order to save CPU use, bandwith or downloaded MBs) programs when they are not in the
                           foreground, etc.
--f  --filter              filter by window class
+-f  --filter              filter by window class (exact match)
 -fa --filter-alternative  filter by window title (caption)
+-fr --filter-regex        filter by window class using regex pattern
 -t  --toggle              also minimize the window if it is already active
 -c  --command             command to check if running and run if no process is found
--p --process overide the process name used when checking if running, defaults to --command
+-p --process              override the process name used when checking if running, defaults to --command
 -u --current-user         will only search processes of the current user. requires loginctl
 EOF
 	exit 0
@@ -132,19 +138,22 @@ fi
 
 SCRIPT_TEMPLATE=$(
 	cat <<EOF
-function kwinactivateclient(clientClass, clientCaption, toggle) {
+function kwinactivateclient(clientClass, clientCaption, clientClassRegex, toggle) {
     var clients = workspace.clientList ? workspace.clientList() : workspace.windowList();
     var activeWindow = workspace.activeClient || workspace.activeWindow;
     var compareToCaption = new RegExp(clientCaption || '', 'i');
+    var compareToClassRegex = clientClassRegex.length > 0 ? new RegExp(clientClassRegex) : null;
     var compareToClass = clientClass;
     var isCompareToClass = clientClass.length > 0;
+    var isCompareToRegex = compareToClassRegex !== null;
     var matchingClients = [];
 
     for (var i = 0; i < clients.length; i++) {
         var client = clients[i];
         var classCompare = (isCompareToClass && client.resourceClass == compareToClass);
-        var captionCompare = (!isCompareToClass && compareToCaption.exec(client.caption));
-        if (classCompare || captionCompare) {
+        var classRegexCompare = (isCompareToRegex && compareToClassRegex.exec(client.resourceClass));
+        var captionCompare = (!isCompareToClass && !isCompareToRegex && compareToCaption.exec(client.caption));
+        if (classCompare || classRegexCompare || captionCompare) {
             matchingClients.push(client);
         }
     }
@@ -173,7 +182,7 @@ function setActiveClient(client){
         workspace.activeWindow = client;
     }
 }
-kwinactivateclient('CLASS_NAME', 'CAPTION_NAME', TOGGLE);
+kwinactivateclient('CLASS_NAME', 'CAPTION_NAME', 'CLASS_REGEX', TOGGLE);
 EOF
 )
 
@@ -185,7 +194,8 @@ function ensure_script {
 		fi
 		SCRIPT_CONTENT=${SCRIPT_TEMPLATE/CLASS_NAME/$1}
 		SCRIPT_CONTENT=${SCRIPT_CONTENT/CAPTION_NAME/$2}
-        SCRIPT_CONTENT=${SCRIPT_CONTENT/TOGGLE/$3}
+		SCRIPT_CONTENT=${SCRIPT_CONTENT/CLASS_REGEX/$3}
+        SCRIPT_CONTENT=${SCRIPT_CONTENT/TOGGLE/$4}
 		echo "$SCRIPT_CONTENT" >"$SCRIPT_PATH"
 	fi
 }
@@ -201,8 +211,8 @@ function ver_lt() {
     printf '%s\n' "$1" "$2" | sort -C -V
 }
 
-if [[ -z "$FILTERBY" && -z "$FILTERALT" ]]; then
-	echo "If you want that this program find a window, you need to specify a window filter — either by class (\`-f\`) or by title (\`-fa\`). More information can be seen if this script is called using the \`--help\` parameter."
+if [[ -z "$FILTERBY" && -z "$FILTERALT" && -z "$FILTERREGEX" ]]; then
+	echo "If you want that this program find a window, you need to specify a window filter — either by class (\`-f\`), by title (\`-fa\`), or by regex (\`-fr\`). More information can be seen if this script is called using the \`--help\` parameter."
 	exit 1
 fi
 
@@ -230,11 +240,11 @@ if [[ -n "$IS_RUNNING" ]]; then
 
 	SCRIPT_FOLDER="$SCRIPT_FOLDER_ROOT/.wwscripts/"
 	# Uses `md5sum` separately in order to avoid masking a return value, as Shellcheck recommends
-	INFO_MD5SUM=$(md5sum <<< "$FILTERBY$FILTERALT") || exit 1
+	INFO_MD5SUM=$(md5sum <<< "$FILTERBY$FILTERALT$FILTERREGEX") || exit 1
 	# Ensures that the script file exists
 	SCRIPT_NAME=$(head -c 32 <<< "$INFO_MD5SUM") || exit 1
 	SCRIPT_PATH="$SCRIPT_FOLDER$SCRIPT_NAME"
-	ensure_script "$FILTERBY" "$FILTERALT" "$TOGGLE"
+	ensure_script "$FILTERBY" "$FILTERALT" "$FILTERREGEX" "$TOGGLE"
 
 	SCRIPT_NAME="ww$RANDOM"
 
