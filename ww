@@ -166,12 +166,29 @@ function kwinactivateclient(clientClass, clientCaption, clientClassRegex, toggle
             client.minimized = !client.minimized;
         }
     } else if (matchingClients.length > 1) {
+        // Check if the active window is one of the matching windows
+        var activeIsMatching = false;
+        for (var j = 0; j < matchingClients.length; j++) {
+            if (activeWindow === matchingClients[j]) {
+                activeIsMatching = true;
+                break;
+            }
+        }
 
+        // Always sort by stacking order
         matchingClients.sort(function (a, b) {
             return a.stackingOrder - b.stackingOrder;
         });
-        const client = matchingClients[0];
-        setActiveClient(client);
+
+        if (activeIsMatching) {
+            // We're already in this app - cycle through windows (pick first)
+            const client = matchingClients[0];
+            setActiveClient(client);
+        } else {
+            // We're switching from another app - pick most recently active (last)
+            const client = matchingClients[matchingClients.length - 1];
+            setActiveClient(client);
+        }
     }
 }
 
