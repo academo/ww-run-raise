@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
 
 TOGGLE="false"
+QUERY="false"
 POSITIONAL=()
 while [[ $# -gt 0 ]]; do
 	key="$1"
 
 	case $key in
+	-q | --query)
+		QUERY="true"
+		shift # past argument
+		;;
 	-c | --command)
 		COMMAND="$2"
 		shift # past argument
@@ -55,6 +60,10 @@ while [[ $# -gt 0 ]]; do
 	esac
 done
 
+if [[ "$QUERY" == "true" ]]; then
+	exec qdbus org.kde.KWin /KWin org.kde.KWin.queryWindowInfo
+fi
+
 if [[ -z "$PROCESS" ]]; then
 	PROCESS=$COMMAND
 fi
@@ -72,6 +81,8 @@ Parameters:
                           other programs, so the user is able to know how much time he/she spends using particular windows, or the user 
                           is able to stop (in order to save CPU use, bandwith or downloaded MBs) programs when they are not in the
                           foreground, etc.
+-q  --query               start window query mode. you need to click a window, informations about it will be shown in the terminal.
+                          you can find the window class as "resourceClass"
 -f  --filter              filter by window class (exact match)
 -fa --filter-alternative  filter by window title (caption)
 -fr --filter-regex        filter by window class using regex pattern
