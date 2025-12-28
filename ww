@@ -87,10 +87,17 @@ dbus_kwin () {
     dbus-send --session --dest=org.kde.KWin --print-reply=literal "$@"
 }
 
+# Cache the version to avoid slow DBus call on every run
 function get_kwin_version() {
-    kwinSupportInfo="$(dbus_kwin /KWin org.kde.KWin.supportInformation)" || exit 1
-    kwinVersion="$(awk '/KWin version:/ {print $3}' <<< "$kwinSupportInfo")" || exit 1
-    echo "$kwinVersion"
+	local cache_file="${XDG_CACHE_HOME:-$HOME/.cache}/ww_kwin_version"   
+	if [[ -f "$cache_file" ]]; then
+		cat "$cache_file"
+		return
+	fi
+	# Pipe directly to awk to avoid storing massive support info in bash variable
+	kwinVersion=$(dbus_kwin /KWin org.kde.KWin.supportInformation | awk '/KWin version:/ {print $3}') || exit 1
+	echo "$kwinVersion" > "$cache_file"
+	echo "$kwinVersion"
 }
 
 if [[ -n "$INFO_ACTIVE" ]]; then
@@ -117,8 +124,9 @@ if [[ -n "$INFO_ACTIVE" ]]; then
     outputJournalctl="$(journalctl --since "$timestamp" --user --user-unit=plasma-kwin_wayland.service --user-unit=plasma-kwin_x11.service --output=cat -g "js: $jsFile")" || exit 1
     # Uses `awk` separately in order to avoid masking a return value, as Shellcheck recommends
     windowId="$(awk '{print $3}' <<< "$outputJournalctl")" || exit 1
-    # Stops the script
-    dbus_kwin "/Scripting/Script$scriptId" org.kde.kwin.Script.stop || exit 1
+	
+	# Stops the script, background the '.stop' call so the script exits immediately (~15ms hidden).
+	nohup dbus-send --session --dest=org.kde.KWin --print-reply=literal "/Scripting/Script$scriptId" org.kde.kwin.Script.stop >/dev/null 2>&1 &
     
     if command -v qdbus 2>&1 >/dev/null; then
         qdbus_bin=qdbus
@@ -235,18 +243,27 @@ fi
 
 USER_FILTER=""
 if [[ -n "$CURRENTUSERONLY" ]] && command -v loginctl >/dev/null 2>&1; then
-	if command -v loginctl >/dev/null 2>&1; then
-   	session_id=$(loginctl show-seat seat0 -p ActiveSession --value)
-   	user_id=$(loginctl show-session "$session_id" -p User --value)
-   	USER_FILTER="-u $user_id"
-	fi
+    # Only run loginctl if we absolutely have to
+    if session_id=$(loginctl show-seat seat0 -p ActiveSession --value 2>/dev/null); then
+       user_id=$(loginctl show-session "$session_id" -p User --value 2>/dev/null)
+       USER_FILTER="-u $user_id"
+    fi
 fi
 
-# Note: In this case, `$USER_FILTER` must not have quotes around it.
-# shellcheck disable=SC2086
-IS_RUNNING=$(pgrep $USER_FILTER -o -a -f "$PROCESS" --ignore-ancestors)
+# Avoids variable assignment overhead, removes '-a' and '-o' which are unused but slow, uses -x for simple commands (fastest), -f for complex ones.
+is_running_check() {
+    if [[ "$PROCESS" == *" "* ]]; then
+        # Complex command: must use -f
+        # shellcheck disable=SC2086
+        pgrep $USER_FILTER -f "$PROCESS" --ignore-ancestors >/dev/null
+    else
+        # Simple command: use -x (FAST, exact match)
+        # shellcheck disable=SC2086
+        pgrep $USER_FILTER -x "$PROCESS" >/dev/null
+    fi
+}
 
-if [[ -n "$IS_RUNNING" ]]; then
+if is_running_check; then
 	# trying for XDG_CONFIG_HOME first.
 	# shellcheck disable=SC2154
 	SCRIPT_FOLDER_ROOT=$XDG_CONFIG_HOME
@@ -287,8 +304,8 @@ if [[ -n "$IS_RUNNING" ]]; then
 	# Run using detected pat
 	dbus_kwin "$SCRIPT_PATH" ${SCRIPT_API_PATH}.run >/dev/null 2>&1
 
-	# Stop using same path
-	dbus_kwin "$SCRIPT_PATH" ${SCRIPT_API_PATH}.stop >/dev/null 2>&1
+	# Stop using same path. Background the '.stop' call so the script exits immediately (~15ms hidden).
+	nohup dbus-send --session --dest=org.kde.KWin --print-reply=literal "$SCRIPT_PATH" ${SCRIPT_API_PATH}.stop >/dev/null 2>&1 &
 
 elif [[ -n "$COMMAND" ]]; then
 	$COMMAND &
