@@ -88,8 +88,9 @@ dbus_kwin () {
 }
 
 # Cache the version to avoid slow DBus call on every run
+# Uses /tmp for auto-invalidation on reboot/cleanup
 function get_kwin_version() {
-	local cache_file="${XDG_CACHE_HOME:-$HOME/.cache}/ww_kwin_version"   
+	local cache_file="/tmp/ww_kwin_version_$(id -u)"
 	if [[ -f "$cache_file" ]]; then
 		cat "$cache_file"
 		return
