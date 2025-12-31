@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 TOGGLE="false"
+CURRENTDESKTOPONLY="false"
 POSITIONAL=()
 while [[ $# -gt 0 ]]; do
 	key="$1"
@@ -30,6 +31,10 @@ while [[ $# -gt 0 ]]; do
 		FILTERREGEX="$2"
 		shift # past argument
 		shift # past value
+		;;
+	-d | --current-desktop)
+		CURRENTDESKTOPONLY="true"
+		shift # past argument
 		;;
 	-t | --toggle)
 		TOGGLE="true"
@@ -75,6 +80,7 @@ Parameters:
 -f  --filter              filter by window class (exact match)
 -fa --filter-alternative  filter by window title (caption)
 -fr --filter-regex        filter by window class using regex pattern
+-d  --current-desktop     only consider windows that are on the current virtual desktop
 -t  --toggle              also minimize the window if it is already active
 -c  --command             command to check if running and run if no process is found
 -p --process              override the process name used when checking if running, defaults to --command
@@ -147,7 +153,64 @@ fi
 
 SCRIPT_TEMPLATE=$(
 	cat <<EOF
-function kwinactivateclient(clientClass, clientCaption, clientClassRegex, toggle) {
+function resolveDesktopId(value) {
+    if (value === undefined || value === null) {
+        return null;
+    }
+    if (typeof value === 'function') {
+        try {
+            return resolveDesktopId(value());
+        } catch (error) {
+            return null;
+        }
+    }
+    if (typeof value === 'object') {
+        if (value.id !== undefined) {
+            return value.id;
+        }
+        if (value.x11DesktopNumber !== undefined) {
+            return value.x11DesktopNumber;
+        }
+        return null;
+    }
+    return value;
+}
+
+function clientOnDesktop(client, desktopId) {
+    if (desktopId === null) {
+        return true;
+    }
+
+    var clientDesktops = client.desktops;
+    if (typeof clientDesktops === 'function') {
+        try {
+            clientDesktops = clientDesktops();
+        } catch (error) {
+            clientDesktops = [];
+        }
+    }
+
+    if (clientDesktops && clientDesktops.length !== undefined) {
+        for (var i = 0; i < clientDesktops.length; i++) {
+            if (resolveDesktopId(clientDesktops[i]) === desktopId) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    if (client.desktop !== undefined) {
+        return resolveDesktopId(client.desktop) === desktopId;
+    }
+
+    if (client.virtualDesktop !== undefined) {
+        return resolveDesktopId(client.virtualDesktop) === desktopId;
+    }
+
+    return true;
+}
+
+function kwinactivateclient(clientClass, clientCaption, clientClassRegex, toggle, limitToCurrentDesktop) {
     var clients = workspace.clientList ? workspace.clientList() : workspace.windowList();
     var activeWindow = workspace.activeClient || workspace.activeWindow;
     var compareToCaption = new RegExp(clientCaption || '', 'i');
@@ -156,9 +219,21 @@ function kwinactivateclient(clientClass, clientCaption, clientClassRegex, toggle
     var isCompareToClass = clientClass.length > 0;
     var isCompareToRegex = compareToClassRegex !== null;
     var matchingClients = [];
+    var desktopSource = null;
+
+    if (workspace.currentDesktop !== undefined) {
+        desktopSource = workspace.currentDesktop;
+    } else if (workspace.currentVirtualDesktop !== undefined) {
+        desktopSource = workspace.currentVirtualDesktop;
+    }
+
+    var currentDesktopId = resolveDesktopId(desktopSource);
 
     for (var i = 0; i < clients.length; i++) {
         var client = clients[i];
+        if (limitToCurrentDesktop && !clientOnDesktop(client, currentDesktopId)) {
+            continue;
+        }
         var classCompare = (isCompareToClass && client.resourceClass == compareToClass);
         var classRegexCompare = (isCompareToRegex && compareToClassRegex.exec(client.resourceClass));
         var captionCompare = (!isCompareToClass && !isCompareToRegex && compareToCaption.exec(client.caption));
@@ -208,7 +283,7 @@ function setActiveClient(client){
         workspace.activeWindow = client;
     }
 }
-kwinactivateclient('CLASS_NAME', 'CAPTION_NAME', 'CLASS_REGEX', TOGGLE);
+kwinactivateclient('CLASS_NAME', 'CAPTION_NAME', 'CLASS_REGEX', TOGGLE, LIMIT_DESKTOP);
 EOF
 )
 
@@ -222,6 +297,7 @@ function ensure_script {
 		SCRIPT_CONTENT=${SCRIPT_CONTENT/CAPTION_NAME/$2}
 		SCRIPT_CONTENT=${SCRIPT_CONTENT/CLASS_REGEX/$3}
         SCRIPT_CONTENT=${SCRIPT_CONTENT/TOGGLE/$4}
+        SCRIPT_CONTENT=${SCRIPT_CONTENT/LIMIT_DESKTOP/$5}
 		echo "$SCRIPT_CONTENT" >"$SCRIPT_PATH"
 	fi
 }
@@ -275,11 +351,11 @@ if is_running_check; then
 
 	SCRIPT_FOLDER="$SCRIPT_FOLDER_ROOT/.wwscripts/"
 	# Uses `md5sum` separately in order to avoid masking a return value, as Shellcheck recommends
-	INFO_MD5SUM=$(md5sum <<< "$FILTERBY$FILTERALT$FILTERREGEX") || exit 1
+	INFO_MD5SUM=$(md5sum <<< "$FILTERBY$FILTERALT$FILTERREGEX$TOGGLE$CURRENTDESKTOPONLY") || exit 1
 	# Ensures that the script file exists
 	SCRIPT_NAME=$(head -c 32 <<< "$INFO_MD5SUM") || exit 1
 	SCRIPT_PATH="$SCRIPT_FOLDER$SCRIPT_NAME"
-	ensure_script "$FILTERBY" "$FILTERALT" "$FILTERREGEX" "$TOGGLE"
+	ensure_script "$FILTERBY" "$FILTERALT" "$FILTERREGEX" "$TOGGLE" "$CURRENTDESKTOPONLY"
 
 	SCRIPT_NAME="ww$RANDOM"
 
