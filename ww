@@ -201,6 +201,21 @@ function kwinactivateclient(clientClass, clientCaption, clientClassRegex, toggle
     }
 }
 
+/**
+ * Checks if given window is on the current virtual desktop.
+ * @param {KWin::XdgToplevelWindow|KWin::X11Window} client Window to inspect
+ * @return {boolean} True if window is on the current desktop or on all desktops
+ */
+function isOnCurrentDesktop(client) {
+    if (client.onAllDesktops) {
+        return true;
+    }
+    if (workspace.currentDesktop !== undefined && client.desktops !== undefined ){
+        return client.desktops.includes(workspace.currentDesktop);
+    }
+    return true; // fallback if API mismatch
+}
+
 function setActiveClient(client){
     if (workspace.activeClient !== undefined) {
         workspace.activeClient = client;
