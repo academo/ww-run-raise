@@ -59,6 +59,7 @@ if you want to see information about the currently active window:
 -f  --filter              filter by window class (exact match)
 -fa --filter-alternative  filter by window title (caption)
 -fr --filter-regex        filter by window class using regex pattern
+-d  --current-desktop     only match windows on the current virtual desktop
 -t  --toggle              also minimize the window if it is already active
 -c  --command             command to check if running and run if no process is found
 -p  --process             override the process name used when checking if running, defaults to --command

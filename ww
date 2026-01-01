@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 TOGGLE="false"
+CURRENT_DESKTOP_ONLY="false"
 POSITIONAL=()
 while [[ $# -gt 0 ]]; do
 	key="$1"
@@ -33,6 +34,10 @@ while [[ $# -gt 0 ]]; do
 		;;
 	-t | --toggle)
 		TOGGLE="true"
+		shift # past argument
+		;;
+	-d | --current-desktop)
+		CURRENT_DESKTOP_ONLY="true"
 		shift # past argument
 		;;
 	-ia | --info-active)
@@ -75,6 +80,7 @@ Parameters:
 -f  --filter              filter by window class (exact match)
 -fa --filter-alternative  filter by window title (caption)
 -fr --filter-regex        filter by window class using regex pattern
+-d  --current-desktop     only consider windows that are on the current virtual desktop
 -t  --toggle              also minimize the window if it is already active
 -c  --command             command to check if running and run if no process is found
 -p --process              override the process name used when checking if running, defaults to --command
@@ -147,7 +153,7 @@ fi
 
 SCRIPT_TEMPLATE=$(
 	cat <<EOF
-function kwinactivateclient(clientClass, clientCaption, clientClassRegex, toggle) {
+function kwinactivateclient(clientClass, clientCaption, clientClassRegex, toggle, currentDesktopOnly) {
     var clients = workspace.clientList ? workspace.clientList() : workspace.windowList();
     var activeWindow = workspace.activeClient || workspace.activeWindow;
     var compareToCaption = new RegExp(clientCaption || '', 'i');
@@ -163,8 +169,7 @@ function kwinactivateclient(clientClass, clientCaption, clientClassRegex, toggle
         var classRegexCompare = (isCompareToRegex && compareToClassRegex.exec(client.resourceClass));
         var captionCompare = (!isCompareToClass && !isCompareToRegex && compareToCaption.exec(client.caption));
         if (classCompare || classRegexCompare || captionCompare) {
-            if (!isOnCurrentDesktop(client))
-            {
+            if (currentDesktopOnly && !isOnCurrentDesktop(client)) {
                 continue;
             }
             matchingClients.push(client);
@@ -227,7 +232,7 @@ function setActiveClient(client){
         workspace.activeWindow = client;
     }
 }
-kwinactivateclient('CLASS_NAME', 'CAPTION_NAME', 'CLASS_REGEX', TOGGLE);
+kwinactivateclient('CLASS_NAME', 'CAPTION_NAME', 'CLASS_REGEX', TOGGLE, CURRENT_DESKTOP_ONLY);
 EOF
 )
 
@@ -241,6 +246,7 @@ function ensure_script {
 		SCRIPT_CONTENT=${SCRIPT_CONTENT/CAPTION_NAME/$2}
 		SCRIPT_CONTENT=${SCRIPT_CONTENT/CLASS_REGEX/$3}
         SCRIPT_CONTENT=${SCRIPT_CONTENT/TOGGLE/$4}
+        SCRIPT_CONTENT=${SCRIPT_CONTENT/CURRENT_DESKTOP_ONLY/$5}
 		echo "$SCRIPT_CONTENT" >"$SCRIPT_PATH"
 	fi
 }
@@ -294,11 +300,11 @@ if is_running_check; then
 
 	SCRIPT_FOLDER="$SCRIPT_FOLDER_ROOT/.wwscripts/"
 	# Uses `md5sum` separately in order to avoid masking a return value, as Shellcheck recommends
-	INFO_MD5SUM=$(md5sum <<< "$FILTERBY$FILTERALT$FILTERREGEX") || exit 1
+	INFO_MD5SUM=$(md5sum <<< "$FILTERBY$FILTERALT$FILTERREGEX$CURRENT_DESKTOP_ONLY") || exit 1
 	# Ensures that the script file exists
 	SCRIPT_NAME=$(head -c 32 <<< "$INFO_MD5SUM") || exit 1
 	SCRIPT_PATH="$SCRIPT_FOLDER$SCRIPT_NAME"
-	ensure_script "$FILTERBY" "$FILTERALT" "$FILTERREGEX" "$TOGGLE"
+	ensure_script "$FILTERBY" "$FILTERALT" "$FILTERREGEX" "$TOGGLE" "$CURRENT_DESKTOP_ONLY"
 
 	SCRIPT_NAME="ww$RANDOM"
 
