@@ -163,6 +163,10 @@ function kwinactivateclient(clientClass, clientCaption, clientClassRegex, toggle
         var classRegexCompare = (isCompareToRegex && compareToClassRegex.exec(client.resourceClass));
         var captionCompare = (!isCompareToClass && !isCompareToRegex && compareToCaption.exec(client.caption));
         if (classCompare || classRegexCompare || captionCompare) {
+            if (!isOnCurrentDesktop(client))
+            {
+                continue;
+            }
             matchingClients.push(client);
         }
     }
