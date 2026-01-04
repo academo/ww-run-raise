@@ -168,7 +168,7 @@ function setActiveClient(client){
  * @param {boolean} currentDesktopOnly If true, only match windows on current desktop
  * @param {string} dbusAddr D-Bus address to signal if no windows found (empty string to disable)
  */
-function kwinactivateclient(clientClass, clientCaption, clientClassRegex, toggle, currentDesktopOnly, dbusAddr) {
+function kwinActivateClient(clientClass, clientCaption, clientClassRegex, toggle, currentDesktopOnly, dbusAddr) {
     var matchingClients = findMatchingClients(clientClass, clientCaption, clientClassRegex, currentDesktopOnly);
 
     if (matchingClients.length === 0) {
@@ -218,7 +218,7 @@ function kwinactivateclient(clientClass, clientCaption, clientClassRegex, toggle
     }
 }
 
-kwinactivateclient('$class_name', '$caption_name', '$class_regex', $toggle, $current_desktop_only, '$dbus_addr');
+kwinActivateClient('$class_name', '$caption_name', '$class_regex', $toggle, $current_desktop_only, '$dbus_addr');
 """)
 
 
@@ -251,7 +251,7 @@ def activate_or_launch(filter_by='', filter_alt='', filter_regex='',
         # Create temporary script file
         with tempfile.NamedTemporaryFile(mode='w', suffix='.js', delete=False) as f:
             script_file = f.name
-            
+
             # If we have a command, we need D-Bus communication
             if command:
                 receiver = DBusMessageReceiver()
@@ -259,7 +259,7 @@ def activate_or_launch(filter_by='', filter_alt='', filter_regex='',
                 dbus_addr = receiver.bus_name
             else:
                 dbus_addr = ''
-            
+
             script_content = render_script(
                 class_name=filter_by,
                 caption_name=filter_alt,
@@ -277,10 +277,10 @@ def activate_or_launch(filter_by='', filter_alt='', filter_regex='',
         if command:
             # Wait for the response from KWin script
             receiver.wait_for_response()
-            
+
             # Stop the script
             script.stop(dbus_interface='org.kde.kwin.Script')
-            
+
             # Launch command if needed
             if receiver.should_launch:
                 subprocess.Popen(command, shell=True)
