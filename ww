@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 
+COMMAND=""
 TOGGLE="false"
 CURRENT_DESKTOP_ONLY="false"
 POSITIONAL=()
@@ -14,11 +15,6 @@ while [[ $# -gt 0 ]]; do
 		;;
 	-f | --filter)
 		FILTERBY="$2"
-		shift # past argument
-		shift # past value
-		;;
-	-p | --process)
-		PROCESS="$2"
 		shift # past argument
 		shift # past value
 		;;
@@ -43,26 +39,18 @@ while [[ $# -gt 0 ]]; do
 	-ia | --info-active)
 		INFO_ACTIVE="1"
 		shift # past argument
-		;;			
-	-u | --current-user)
-		CURRENTUSERONLY="true"
-		shift # past argument
 		;;
 	-h | --help)
 		HELP="1"
 		shift # past argument
 		shift # past value
 		;;
-	*)                  # unknown option
-		POSITIONAL+=("$1") # save it in an array for later
-		shift              # past argument
+	*)
+		POSITIONAL+=("$1")
+		shift
 		;;
 	esac
 done
-
-if [[ -z "$PROCESS" ]]; then
-	PROCESS=$COMMAND
-fi
 
 set -- "${POSITIONAL[@]}" # restore positional parameters
 
@@ -74,7 +62,7 @@ Parameters:
 
 -h  --help                show this help
 -ia --info-active         show information about the active window. Using this parameter, this program can be periodically called from
-                          other programs, so the user is able to know how much time he/she spends using particular windows, or the user 
+                          other programs, so the user is able to know how much time he/she spends using particular windows, or the user
                           is able to stop (in order to save CPU use, bandwith or downloaded MBs) programs when they are not in the
                           foreground, etc.
 -f  --filter              filter by window class (exact match)
@@ -82,9 +70,7 @@ Parameters:
 -fr --filter-regex        filter by window class using regex pattern
 -d  --current-desktop     only consider windows that are on the current virtual desktop
 -t  --toggle              also minimize the window if it is already active
--c  --command             command to check if running and run if no process is found
--p --process              override the process name used when checking if running, defaults to --command
--u --current-user         will only search processes of the current user. requires loginctl
+-c  --command             command to run when no matching window is found
 EOF
 	exit 0
 fi
@@ -109,32 +95,32 @@ function get_kwin_version() {
 
 if [[ -n "$INFO_ACTIVE" ]]; then
     kwinVersion=$(get_kwin_version)
-    kwinMajorVersion="$(awk -F"." '{print $1}' <<< "$kwinVersion")" || exit 1    
+    kwinMajorVersion="$(awk -F"." '{print $1}' <<< "$kwinVersion")" || exit 1
     # This feature needs at least this KWin version
     readonly minimumVersion=6 || exit 1
     if [[ "$kwinMajorVersion" -lt "$minimumVersion" ]]; then
-        echo "ERROR: This feature needs KWin $minimumVersion or later." >&2 
+        echo "ERROR: This feature needs KWin $minimumVersion or later." >&2
         exit 1
     fi
 
     # This way is similar to the one used on https://discuss.kde.org/t/xdotool-replacement-on-wayland/7242/9
     jsFile="$(mktemp)" || exit 1   # It is the file where the javascript code is going to be saved
     echo "print(\"$jsFile\",workspace.activeWindow.internalId);" > "$jsFile" || exit 1
-    
+
     scriptId_response="$(dbus_kwin /Scripting org.kde.kwin.Scripting.loadScript "string:$jsFile")" || exit 1
     scriptId=$(awk '{print $2}' <<< "$scriptId_response") || exit 1
     timestamp="$(date +"%Y-%m-%d %H:%M:%S")" || exit 1
     # Starts the script
     dbus_kwin "/Scripting/Script$scriptId" org.kde.kwin.Script.run || exit 1
-    
+
     # Uses some arguments that are also seen on https://github.com/jinliu/kdotool/blob/master/src/main.rs
     outputJournalctl="$(journalctl --since "$timestamp" --user --user-unit=plasma-kwin_wayland.service --user-unit=plasma-kwin_x11.service --output=cat -g "js: $jsFile")" || exit 1
     # Uses `awk` separately in order to avoid masking a return value, as Shellcheck recommends
     windowId="$(awk '{print $3}' <<< "$outputJournalctl")" || exit 1
-	
+
 	# Stops the script, background the '.stop' call so the script exits immediately (~15ms hidden).
 	nohup dbus-send --session --dest=org.kde.KWin --print-reply=literal "/Scripting/Script$scriptId" org.kde.kwin.Script.stop >/dev/null 2>&1 &
-    
+
     if command -v qdbus 2>&1 >/dev/null; then
         qdbus_bin=qdbus
     elif command -v qdbus6 2>&1 >/dev/null; then
@@ -147,15 +133,14 @@ if [[ -n "$INFO_ACTIVE" ]]; then
 
     # Shows the information about that window
     $qdbus_bin org.kde.KWin /KWin org.kde.KWin.getWindowInfo "$windowId" || exit 1
-    
+
     exit 0
 fi
 
 SCRIPT_TEMPLATE=$(
 	cat <<EOF
-function kwinactivateclient(clientClass, clientCaption, clientClassRegex, toggle, currentDesktopOnly) {
+function findMatchingClients(clientClass, clientCaption, clientClassRegex, currentDesktopOnly) {
     var clients = workspace.clientList ? workspace.clientList() : workspace.windowList();
-    var activeWindow = workspace.activeClient || workspace.activeWindow;
     var compareToCaption = new RegExp(clientCaption || '', 'i');
     var compareToClassRegex = clientClassRegex.length > 0 ? new RegExp(clientClassRegex) : null;
     var compareToClass = clientClass;
@@ -166,7 +151,7 @@ function kwinactivateclient(clientClass, clientCaption, clientClassRegex, toggle
     for (var i = 0; i < clients.length; i++) {
         var client = clients[i];
         var classCompare = (isCompareToClass && client.resourceClass == compareToClass);
-        var classRegexCompare = (isCompareToRegex && compareToClassRegex.exec(client.resourceClass));
+        var classRegexCompare = (isCompareToRegex && compareToClassRegex && compareToClassRegex.exec(client.resourceClass));
         var captionCompare = (!isCompareToClass && !isCompareToRegex && compareToCaption.exec(client.caption));
         if (classCompare || classRegexCompare || captionCompare) {
             if (currentDesktopOnly && !isOnCurrentDesktop(client)) {
@@ -175,6 +160,23 @@ function kwinactivateclient(clientClass, clientCaption, clientClassRegex, toggle
             matchingClients.push(client);
         }
     }
+
+    return matchingClients;
+}
+
+function kwinactivateclient(clientClass, clientCaption, clientClassRegex, toggle, currentDesktopOnly, detectionOnly, detectionToken) {
+    var matchingClients = findMatchingClients(clientClass, clientCaption, clientClassRegex, currentDesktopOnly);
+
+    if (detectionOnly) {
+        print("ww-detect " + detectionToken + " " + matchingClients.length);
+        return;
+    }
+
+    if (matchingClients.length === 0) {
+        return;
+    }
+
+    var activeWindow = workspace.activeClient || workspace.activeWindow;
 
     if (matchingClients.length === 1) {
         var client = matchingClients[0];
@@ -232,22 +234,38 @@ function setActiveClient(client){
         workspace.activeWindow = client;
     }
 }
-kwinactivateclient('CLASS_NAME', 'CAPTION_NAME', 'CLASS_REGEX', TOGGLE, CURRENT_DESKTOP_ONLY);
+kwinactivateclient('CLASS_NAME', 'CAPTION_NAME', 'CLASS_REGEX', TOGGLE, CURRENT_DESKTOP_ONLY, DETECTION_ONLY, 'DETECTION_TOKEN');
 EOF
 )
 
 # ensure the script file exists
+function render_script_content() {
+	local class_value="${1:-}"
+	local caption_value="${2:-}"
+	local regex_value="${3:-}"
+	local toggle_value="${4:-false}"
+	local current_desktop_value="${5:-false}"
+	local detection_only_value="${6:-false}"
+	local detection_token_value="${7:-}"
+	local script="$SCRIPT_TEMPLATE"
+
+	script=${script//CLASS_NAME/$class_value}
+	script=${script//CAPTION_NAME/$caption_value}
+	script=${script//CLASS_REGEX/$regex_value}
+	script=${script//TOGGLE/$toggle_value}
+	script=${script//CURRENT_DESKTOP_ONLY/$current_desktop_value}
+	script=${script//DETECTION_ONLY/$detection_only_value}
+	script=${script//DETECTION_TOKEN/$detection_token_value}
+
+	printf '%s\n' "$script"
+}
+
 function ensure_script {
-	if [[ ! -f SCRIPT_PATH ]]; then
+	if [[ ! -f "$SCRIPT_PATH" ]]; then
 		if [[ ! -d "$SCRIPT_FOLDER" ]]; then
 			mkdir -p "$SCRIPT_FOLDER"
 		fi
-		SCRIPT_CONTENT=${SCRIPT_TEMPLATE/CLASS_NAME/$1}
-		SCRIPT_CONTENT=${SCRIPT_CONTENT/CAPTION_NAME/$2}
-		SCRIPT_CONTENT=${SCRIPT_CONTENT/CLASS_REGEX/$3}
-        SCRIPT_CONTENT=${SCRIPT_CONTENT/TOGGLE/$4}
-        SCRIPT_CONTENT=${SCRIPT_CONTENT/CURRENT_DESKTOP_ONLY/$5}
-		echo "$SCRIPT_CONTENT" >"$SCRIPT_PATH"
+		render_script_content "$1" "$2" "$3" "$4" "$5" "false" "" >"$SCRIPT_PATH"
 	fi
 }
 
@@ -262,77 +280,115 @@ function ver_lt() {
     printf '%s\n' "$1" "$2" | sort -C -V
 }
 
+function determine_script_paths() {
+	local kwin_version="$1"
+	local script_id="$2"
+	local -n api_ref="$3"
+	local -n path_ref="$4"
+
+	if ver_between 5.21.90 "$kwin_version" 5.27.79; then
+		api_ref=org.kde.kwin.Script
+		path_ref="/$script_id"
+	elif ver_lt 5.27.80 "$kwin_version"; then
+		api_ref=org.kde.kwin.Script
+		path_ref="/Scripting/Script$script_id"
+	else
+		api_ref=org.kde.kwin.Scripting
+		path_ref="/$script_id"
+	fi
+}
+
+function kwin_matching_window_count() {
+	local token="wwdetect_${RANDOM}_$$"
+	local script_file
+	script_file="$(mktemp)" || return 1
+
+	if ! render_script_content "$FILTERBY" "$FILTERALT" "$FILTERREGEX" "$TOGGLE" "$CURRENT_DESKTOP_ONLY" "true" "$token" >"$script_file"; then
+		rm -f "$script_file"
+		return 1
+	fi
+
+	local script_name="wwdetect$RANDOM"
+	local timestamp
+	timestamp="$(date +"%Y-%m-%d %H:%M:%S")" || { rm -f "$script_file"; return 1; }
+
+	local load_response
+	if ! load_response=$(dbus_kwin /Scripting org.kde.kwin.Scripting.loadScript "string:$script_file" "string:$script_name"); then
+		rm -f "$script_file"
+		return 1
+	fi
+
+	local script_id
+	if ! script_id=$(awk '{print $2}' <<< "$load_response"); then
+		rm -f "$script_file"
+		return 1
+	fi
+
+	local kwinVersion
+	kwinVersion=$(get_kwin_version) || { rm -f "$script_file"; return 1; }
+
+	local script_api_path
+	local script_dbus_path
+	determine_script_paths "$kwinVersion" "$script_id" script_api_path script_dbus_path
+
+	if ! dbus_kwin "$script_dbus_path" ${script_api_path}.run >/dev/null 2>&1; then
+		rm -f "$script_file"
+		return 1
+	fi
+
+	local detection_line
+	detection_line="$(journalctl --since "$timestamp" --user --user-unit=plasma-kwin_wayland.service --user-unit=plasma-kwin_x11.service --output=cat --no-pager -g "ww-detect $token" | tail -n 1)"
+
+	nohup dbus-send --session --dest=org.kde.KWin --print-reply=literal "$script_dbus_path" ${script_api_path}.stop >/dev/null 2>&1 &
+	rm -f "$script_file"
+
+	local count
+	count=$(awk '{print $4}' <<< "$detection_line")
+	if [[ -z "$count" ]]; then
+		count=0
+	fi
+
+	echo "$count"
+}
+
 if [[ -z "$FILTERBY" && -z "$FILTERALT" && -z "$FILTERREGEX" ]]; then
 	echo "If you want that this program find a window, you need to specify a window filter — either by class (\`-f\`), by title (\`-fa\`), or by regex (\`-fr\`). More information can be seen if this script is called using the \`--help\` parameter."
 	exit 1
 fi
 
-USER_FILTER=""
-if [[ -n "$CURRENTUSERONLY" ]] && command -v loginctl >/dev/null 2>&1; then
-    # Only run loginctl if we absolutely have to
-    if session_id=$(loginctl show-seat seat0 -p ActiveSession --value 2>/dev/null); then
-       user_id=$(loginctl show-session "$session_id" -p User --value 2>/dev/null)
-       USER_FILTER="-u $user_id"
-    fi
-fi
-
-# Avoids variable assignment overhead, removes '-a' and '-o' which are unused but slow, uses -x for simple commands (fastest), -f for complex ones.
-is_running_check() {
-    if [[ "$PROCESS" == *" "* ]]; then
-        # Complex command: must use -f
-        # shellcheck disable=SC2086
-        pgrep $USER_FILTER -f "$PROCESS" --ignore-ancestors >/dev/null
-    else
-        # Simple command: use -x (FAST, exact match)
-        # shellcheck disable=SC2086
-        pgrep $USER_FILTER -x "$PROCESS" >/dev/null
-    fi
-}
-
-if is_running_check; then
-	# trying for XDG_CONFIG_HOME first.
-	# shellcheck disable=SC2154
-	SCRIPT_FOLDER_ROOT=$XDG_CONFIG_HOME
-	if [[ -z $SCRIPT_FOLDER_ROOT ]]; then
-		# fallback to the home folder
-		SCRIPT_FOLDER_ROOT=$HOME
+if [[ -n "$COMMAND" ]]; then
+	match_count=$(kwin_matching_window_count)
+	if [[ $? -ne 0 ]]; then
+		echo "ERROR: Unable to query KWin for matching windows." >&2
+		exit 1
 	fi
 
-	SCRIPT_FOLDER="$SCRIPT_FOLDER_ROOT/.wwscripts/"
-	# Uses `md5sum` separately in order to avoid masking a return value, as Shellcheck recommends
-	INFO_MD5SUM=$(md5sum <<< "$FILTERBY$FILTERALT$FILTERREGEX$CURRENT_DESKTOP_ONLY") || exit 1
-	# Ensures that the script file exists
-	SCRIPT_NAME=$(head -c 32 <<< "$INFO_MD5SUM") || exit 1
-	SCRIPT_PATH="$SCRIPT_FOLDER$SCRIPT_NAME"
-	ensure_script "$FILTERBY" "$FILTERALT" "$FILTERREGEX" "$TOGGLE" "$CURRENT_DESKTOP_ONLY"
-
-	SCRIPT_NAME="ww$RANDOM"
-
-	INFO_DBUS_SEND=$(dbus_kwin /Scripting org.kde.kwin.Scripting.loadScript "string:$SCRIPT_PATH" "string:$SCRIPT_NAME") || exit 1
-	# Uses `awk` separately in order to avoid masking a return value, as Shellcheck recommends
-	ID=$(awk '{print $2}' <<< "$INFO_DBUS_SEND") || exit 1
-
-	# Use kwin version to decide how to call the script run api which changes between kwin versions.
-	# See https://github.com/academo/ww-run-raise/issues/15#issuecomment-2632214974 for more info.
-	kwinVersion=$(get_kwin_version)
-
-	if ver_between 5.21.90 "$kwinVersion" 5.27.79; then
-		SCRIPT_API_PATH=org.kde.kwin.Script
-		SCRIPT_PATH="/$ID"
-	elif ver_lt 5.27.80 "$kwinVersion"; then
-		SCRIPT_API_PATH=org.kde.kwin.Script
-		SCRIPT_PATH="/Scripting/Script$ID"
-	else
-		SCRIPT_API_PATH=org.kde.kwin.Scripting
-		SCRIPT_PATH="/$ID"
+	if [[ "$match_count" -eq 0 ]]; then
+		$COMMAND &
+		exit 0
 	fi
-
-	# Run using detected pat
-	dbus_kwin "$SCRIPT_PATH" ${SCRIPT_API_PATH}.run >/dev/null 2>&1
-
-	# Stop using same path. Background the '.stop' call so the script exits immediately (~15ms hidden).
-	nohup dbus-send --session --dest=org.kde.KWin --print-reply=literal "$SCRIPT_PATH" ${SCRIPT_API_PATH}.stop >/dev/null 2>&1 &
-
-elif [[ -n "$COMMAND" ]]; then
-	$COMMAND &
 fi
+
+SCRIPT_FOLDER_ROOT=$XDG_CONFIG_HOME
+if [[ -z $SCRIPT_FOLDER_ROOT ]]; then
+	SCRIPT_FOLDER_ROOT=$HOME
+fi
+
+SCRIPT_FOLDER="$SCRIPT_FOLDER_ROOT/.wwscripts/"
+INFO_MD5SUM=$(md5sum <<< "$FILTERBY$FILTERALT$FILTERREGEX$CURRENT_DESKTOP_ONLY$TOGGLE") || exit 1
+SCRIPT_NAME=$(head -c 32 <<< "$INFO_MD5SUM") || exit 1
+SCRIPT_PATH="$SCRIPT_FOLDER$SCRIPT_NAME"
+ensure_script "$FILTERBY" "$FILTERALT" "$FILTERREGEX" "$TOGGLE" "$CURRENT_DESKTOP_ONLY"
+
+SCRIPT_NAME="ww$RANDOM"
+
+INFO_DBUS_SEND=$(dbus_kwin /Scripting org.kde.kwin.Scripting.loadScript "string:$SCRIPT_PATH" "string:$SCRIPT_NAME") || exit 1
+ID=$(awk '{print $2}' <<< "$INFO_DBUS_SEND") || exit 1
+
+kwinVersion=$(get_kwin_version)
+
+determine_script_paths "$kwinVersion" "$ID" SCRIPT_API_PATH SCRIPT_PATH
+
+dbus_kwin "$SCRIPT_PATH" ${SCRIPT_API_PATH}.run >/dev/null 2>&1
+
+nohup dbus-send --session --dest=org.kde.KWin --print-reply=literal "$SCRIPT_PATH" ${SCRIPT_API_PATH}.stop >/dev/null 2>&1 &
