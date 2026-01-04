@@ -32,7 +32,6 @@ class DBusMessageReceiver:
     """Receive D-Bus messages from KWin scripts."""
 
     match_count: int | None = None
-    window_info: str | None = None
     loop: GLib.MainLoop | None = None
     bus: dbus.SessionBus = field(init=False)
     bus_name: str = field(init=False)
@@ -49,12 +48,6 @@ class DBusMessageReceiver:
         if self.loop:
             self.loop.quit()
 
-    def window_info_handler(self, info_str):
-        """Handle windowInfo message from KWin script."""
-        self.window_info = info_str
-        if self.loop:
-            self.loop.quit()
-
     def register_handlers(self):
         """Register D-Bus method handlers."""
         self.bus.add_message_filter(self._message_filter)
@@ -64,8 +57,6 @@ class DBusMessageReceiver:
         match message.get_member():
             case 'matchCount' if (args := message.get_args_list()):
                 self.match_count_handler(args[0])
-            case 'windowInfo' if (args := message.get_args_list()):
-                self.window_info_handler(args[0])
         return dbus.lowlevel.HANDLER_RESULT_HANDLED
 
     def wait_for_response(self, timeout_ms=5000):
@@ -171,105 +162,12 @@ kwinactivateclient('$class_name', '$caption_name', '$class_regex', $toggle, $cur
 """)
 
 
-WINDOW_INFO_SCRIPT_TEMPLATE = Template("""
-function getActiveWindowInfo(dbusAddr) {
-    var client = workspace.activeWindow;
-    if (!client) {
-        callDBus(dbusAddr, "/", "", "windowInfo", "No active window");
-        return;
-    }
-
-    var info = "Window Class: " + (client.resourceClass || "N/A") + "\\n";
-    info += "Window Caption: " + (client.caption || "N/A") + "\\n";
-    info += "Window ID: " + (client.internalId || "N/A") + "\\n";
-    info += "Desktop: " + (client.desktops ? client.desktops.map(d => d.name).join(", ") : "N/A") + "\\n";
-    info += "On All Desktops: " + (client.onAllDesktops || false) + "\\n";
-    info += "Minimized: " + (client.minimized || false) + "\\n";
-    info += "Fullscreen: " + (client.fullScreen || false);
-
-    callDBus(dbusAddr, "/", "", "windowInfo", info);
-}
-getActiveWindowInfo('$dbus_addr');
-""")
-
-
-def get_kwin_version():
-    """Get KWin version, cached in /tmp."""
-    cache_file = Path(f"/tmp/ww_kwin_version_{os.getuid()}")
-
-    if cache_file.exists():
-        if version := cache_file.read_text().strip():
-            return version
-
-    try:
-        bus = dbus.SessionBus()
-        kwin = bus.get_object('org.kde.KWin', '/KWin')
-        support_info = kwin.supportInformation(dbus_interface='org.kde.KWin')
-
-        for line in support_info.split('\n'):
-            if 'KWin version:' in line:
-                version = line.split()[2]
-                cache_file.write_text(version)
-                return version
-    except Exception as e:
-        print(f"ERROR: Failed to get KWin version: {e}", file=sys.stderr)
-        sys.exit(1)
-
-    print("ERROR: Could not determine KWin version", file=sys.stderr)
-    sys.exit(1)
-
-
 def get_kwin_script_object(script_file):
     """Load and return a KWin script object."""
     bus = dbus.SessionBus()
     kwin_scripting = bus.get_object('org.kde.KWin', '/Scripting')
     script_id = kwin_scripting.loadScript(script_file, dbus_interface='org.kde.kwin.Scripting')
     return bus.get_object('org.kde.KWin', f"/Scripting/Script{script_id}")
-
-
-def get_active_window_info():
-    """Get information about the active window."""
-    kwin_version = get_kwin_version()
-    major_version = int(kwin_version.split('.')[0])
-
-    if major_version < 6:
-        print("ERROR: This feature needs KWin 6 or later.", file=sys.stderr)
-        sys.exit(1)
-
-    receiver = DBusMessageReceiver()
-    receiver.register_handlers()
-
-    script_file = None
-    try:
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.js', delete=False) as f:
-            script_file = f.name
-            script_content = WINDOW_INFO_SCRIPT_TEMPLATE.substitute(
-                dbus_addr=receiver.bus_name
-            )
-            f.write(script_content)
-
-        script = get_kwin_script_object(script_file)
-        script.run(dbus_interface='org.kde.kwin.Script')
-
-        # Wait for the response
-        receiver.wait_for_response()
-
-        # Stop the script
-        script.stop(dbus_interface='org.kde.kwin.Script')
-
-        if script_file and os.path.exists(script_file):
-            os.unlink(script_file)
-
-        if receiver.window_info:
-            print(receiver.window_info)
-        else:
-            print("ERROR: No window info received", file=sys.stderr)
-
-    except Exception as e:
-        print(f"ERROR: Failed to get active window info: {e}", file=sys.stderr)
-        if script_file and os.path.exists(script_file):
-            os.unlink(script_file)
-        sys.exit(1)
 
 
 def render_script_content(class_name='', caption_name='', class_regex='',
@@ -377,8 +275,6 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
-    parser.add_argument('-ia', '--info-active', action='store_true',
-                       help='show information about the active window')
     parser.add_argument('-f', '--filter', dest='filter_by', default='',
                        help='filter by window class (exact match)')
     parser.add_argument('-fa', '--filter-alternative', dest='filter_alt', default='',
@@ -393,10 +289,6 @@ def main():
                        help='command to run when no matching window is found')
 
     args = parser.parse_args()
-
-    if args.info_active:
-        get_active_window_info()
-        return
 
     if not args.filter_by and not args.filter_alt and not args.filter_regex:
         print("ERROR: You need to specify a window filter — either by class (-f), "
