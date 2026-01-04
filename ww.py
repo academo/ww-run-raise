@@ -82,6 +82,14 @@ function isOnCurrentDesktop(client) {
     return true; // fallback if API mismatch
 }
 
+/**
+ * Find all windows matching the specified filters.
+ * @param {string} clientClass Window class to match (exact match)
+ * @param {string} clientCaption Window caption/title to match (regex, case-insensitive)
+ * @param {string} clientClassRegex Window class regex pattern to match
+ * @param {boolean} currentDesktopOnly If true, only include windows on current desktop
+ * @return {Array<KWin::XdgToplevelWindow|KWin::X11Window>} Array of matching windows
+ */
 function findMatchingClients(clientClass, clientCaption, clientClassRegex, currentDesktopOnly) {
     var clients = workspace.windowList();
     var compareToCaption = new RegExp(clientCaption || '', 'i');
@@ -107,10 +115,24 @@ function findMatchingClients(clientClass, clientCaption, clientClassRegex, curre
     return matchingClients;
 }
 
+/**
+ * Set the specified window as the active window.
+ * @param {KWin::XdgToplevelWindow|KWin::X11Window} client Window to activate
+ */
 function setActiveClient(client){
     workspace.activeWindow = client;
 }
 
+/**
+ * Activate a window matching the specified filters, or signal via D-Bus if no match found.
+ * When multiple windows match, cycles through them based on current focus state.
+ * @param {string} clientClass Window class to match (exact match)
+ * @param {string} clientCaption Window caption/title to match (regex, case-insensitive)
+ * @param {string} clientClassRegex Window class regex pattern to match
+ * @param {boolean} toggle If true, minimize the window if it's already active
+ * @param {boolean} currentDesktopOnly If true, only match windows on current desktop
+ * @param {string} dbusAddr D-Bus address to signal if no windows found (empty string to disable)
+ */
 function kwinactivateclient(clientClass, clientCaption, clientClassRegex, toggle, currentDesktopOnly, dbusAddr) {
     var matchingClients = findMatchingClients(clientClass, clientCaption, clientClassRegex, currentDesktopOnly);
 
