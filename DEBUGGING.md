@@ -37,6 +37,7 @@ function dumpObject(obj) {
 Docs: https://develop.kde.org/docs/plasma/kwin/api/
 ## client KWin::XdgToplevelWindow or KWin::X11Window
 ### KWin::XdgToplevelWindow(0x5592f2331140)
+```
 ---- dumping properties ----
 objectName:
 bufferGeometry: QRectF(1280, 748, 1279, 691)
@@ -195,8 +196,9 @@ nextTargetScaleChanged: function() { [native code] }
 closeWindow: function() { [native code] }
 setReadyForPainting: function() { [native code] }
 setMaximize: function() { [native code] }
-
+```
 ### KWin::X11Window(0x5592f29e0980)
+```
 ---- dumping properties ----
 objectName:
 bufferGeometry: QRectF(314, 1468, 1876, 1171)
@@ -357,8 +359,9 @@ setReadyForPainting: function() { [native code] }
 setMaximize: function() { [native code] }
 shapeChanged: function() { [native code] }
 updateCaption: function() { [native code] }
-
+```
 ## workspace KWin::QtScriptWorkspaceWrapper(0x5592f0d1cdf0)
+```
 ---- dumping properties ----
 objectName:
 desktops: KWin::VirtualDesktop(0x5592f0c25250),KWin::VirtualDesktop(0x5592f0c4f5d0),KWin::VirtualDesktop(0x5592f0c4f400)
@@ -474,3 +477,4 @@ getClient: function() { [native code] }
 windowAt: function() { [native code] }
 isEffectActive: function() { [native code] }
 windowList: function() { [native code] }
+```
