@@ -67,6 +67,21 @@ class DBusMessageReceiver:
 
 
 SCRIPT_TEMPLATE = Template("""
+/**
+ * Checks if given window is on the current virtual desktop.
+ * @param {KWin::XdgToplevelWindow|KWin::X11Window} client Window to inspect
+ * @return {boolean} True if window is on the current desktop or on all desktops
+ */
+function isOnCurrentDesktop(client) {
+    if (client.onAllDesktops) {
+        return true;
+    }
+    if (workspace.currentDesktop !== undefined && client.desktops !== undefined ){
+        return client.desktops.includes(workspace.currentDesktop);
+    }
+    return true; // fallback if API mismatch
+}
+
 function findMatchingClients(clientClass, clientCaption, clientClassRegex, currentDesktopOnly) {
     var clients = workspace.windowList();
     var compareToCaption = new RegExp(clientCaption || '', 'i');
@@ -90,6 +105,10 @@ function findMatchingClients(clientClass, clientCaption, clientClassRegex, curre
     }
 
     return matchingClients;
+}
+
+function setActiveClient(client){
+    workspace.activeWindow = client;
 }
 
 function kwinactivateclient(clientClass, clientCaption, clientClassRegex, toggle, currentDesktopOnly, dbusAddr) {
@@ -140,25 +159,6 @@ function kwinactivateclient(clientClass, clientCaption, clientClassRegex, toggle
             setActiveClient(client);
         }
     }
-}
-
-/**
- * Checks if given window is on the current virtual desktop.
- * @param {KWin::XdgToplevelWindow|KWin::X11Window} client Window to inspect
- * @return {boolean} True if window is on the current desktop or on all desktops
- */
-function isOnCurrentDesktop(client) {
-    if (client.onAllDesktops) {
-        return true;
-    }
-    if (workspace.currentDesktop !== undefined && client.desktops !== undefined ){
-        return client.desktops.includes(workspace.currentDesktop);
-    }
-    return true; // fallback if API mismatch
-}
-
-function setActiveClient(client){
-    workspace.activeWindow = client;
 }
 
 kwinactivateclient('$class_name', '$caption_name', '$class_regex', $toggle, $current_desktop_only, '$dbus_addr');
