@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from string import Template
 
 try:
     import dbus
@@ -25,7 +26,7 @@ except ImportError:
     sys.exit(1)
 
 
-SCRIPT_TEMPLATE = """
+SCRIPT_TEMPLATE = Template("""
 function findMatchingClients(clientClass, clientCaption, clientClassRegex, currentDesktopOnly) {
     var clients = workspace.windowList();
     var compareToCaption = new RegExp(clientCaption || '', 'i');
@@ -117,8 +118,8 @@ function isOnCurrentDesktop(client) {
 function setActiveClient(client){
     workspace.activeWindow = client;
 }
-kwinactivateclient('CLASS_NAME', 'CAPTION_NAME', 'CLASS_REGEX', TOGGLE, CURRENT_DESKTOP_ONLY, DETECTION_ONLY, 'DBUS_ADDR');
-"""
+kwinactivateclient('$class_name', '$caption_name', '$class_regex', $toggle, $current_desktop_only, $detection_only, '$dbus_addr');
+""")
 
 
 def get_kwin_version():
@@ -220,15 +221,15 @@ def render_script_content(class_name='', caption_name='', class_regex='',
                          toggle=False, current_desktop_only=False,
                          detection_only=False, dbus_addr=''):
     """Render the KWin script with the given parameters."""
-    script = SCRIPT_TEMPLATE
-    script = script.replace('CLASS_NAME', class_name)
-    script = script.replace('CAPTION_NAME', caption_name)
-    script = script.replace('CLASS_REGEX', class_regex)
-    script = script.replace('TOGGLE', 'true' if toggle else 'false')
-    script = script.replace('CURRENT_DESKTOP_ONLY', 'true' if current_desktop_only else 'false')
-    script = script.replace('DETECTION_ONLY', 'true' if detection_only else 'false')
-    script = script.replace('DBUS_ADDR', dbus_addr)
-    return script
+    return SCRIPT_TEMPLATE.substitute(
+        class_name=class_name,
+        caption_name=caption_name,
+        class_regex=class_regex,
+        toggle='true' if toggle else 'false',
+        current_desktop_only='true' if current_desktop_only else 'false',
+        detection_only='true' if detection_only else 'false',
+        dbus_addr=dbus_addr
+    )
 
 
 class DBusMessageReceiver:
