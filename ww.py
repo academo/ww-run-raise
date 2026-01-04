@@ -31,7 +31,7 @@ except ImportError:
 class DBusMessageReceiver:
     """Receive D-Bus messages from KWin scripts."""
 
-    match_count: int | None = None
+    has_matches: bool | None = None
     loop: GLib.MainLoop | None = None
     bus: dbus.SessionBus = field(init=False)
     bus_name: str = field(init=False)
@@ -42,9 +42,9 @@ class DBusMessageReceiver:
         self.bus = dbus.SessionBus()
         self.bus_name = self.bus.get_unique_name()
 
-    def match_count_handler(self, count_str):
-        """Handle matchCount message from KWin script."""
-        self.match_count = int(count_str)
+    def has_matches_handler(self, has_matches_str):
+        """Handle hasMatches message from KWin script."""
+        self.has_matches = has_matches_str.lower() == 'true'
         if self.loop:
             self.loop.quit()
 
@@ -55,8 +55,8 @@ class DBusMessageReceiver:
     def _message_filter(self, bus, message):
         """Filter incoming D-Bus messages."""
         match message.get_member():
-            case 'matchCount' if (args := message.get_args_list()):
-                self.match_count_handler(args[0])
+            case 'hasMatches' if (args := message.get_args_list()):
+                self.has_matches_handler(args[0])
         return dbus.lowlevel.HANDLER_RESULT_HANDLED
 
     def wait_for_response(self, timeout_ms=5000):
@@ -96,7 +96,8 @@ function kwinactivateclient(clientClass, clientCaption, clientClassRegex, toggle
     var matchingClients = findMatchingClients(clientClass, clientCaption, clientClassRegex, currentDesktopOnly);
 
     if (detectionOnly) {
-        callDBus(dbusAddr, "/", "", "matchCount", matchingClients.length.toString());
+        var hasMatches = matchingClients.length > 0;
+        callDBus(dbusAddr, "/", "", "hasMatches", hasMatches.toString());
         return;
     }
 
@@ -185,9 +186,9 @@ def render_script_content(class_name='', caption_name='', class_regex='',
     )
 
 
-def get_matching_window_count(filter_by='', filter_alt='', filter_regex='',
-                              current_desktop_only=False, toggle=False):
-    """Query KWin for the number of matching windows using D-Bus."""
+def has_matching_windows(filter_by='', filter_alt='', filter_regex='',
+                         current_desktop_only=False, toggle=False):
+    """Query KWin to check if there are any matching windows using D-Bus."""
     receiver = DBusMessageReceiver()
     receiver.register_handlers()
 
@@ -218,13 +219,13 @@ def get_matching_window_count(filter_by='', filter_alt='', filter_regex='',
         if script_file and os.path.exists(script_file):
             os.unlink(script_file)
 
-        return receiver.match_count if receiver.match_count is not None else 0
+        return receiver.has_matches if receiver.has_matches is not None else False
 
     except Exception as e:
         print(f"ERROR: Failed to query KWin: {e}", file=sys.stderr)
         if script_file and os.path.exists(script_file):
             os.unlink(script_file)
-        return 0
+        return False
 
 
 def activate_window(filter_by='', filter_alt='', filter_regex='',
@@ -298,7 +299,7 @@ def main():
 
     # Check if we need to launch the command
     if args.command:
-        match_count = get_matching_window_count(
+        has_matches = has_matching_windows(
             filter_by=args.filter_by,
             filter_alt=args.filter_alt,
             filter_regex=args.filter_regex,
@@ -306,7 +307,7 @@ def main():
             toggle=args.toggle
         )
 
-        if match_count == 0:
+        if not has_matches:
             subprocess.Popen(args.command, shell=True)
             return
 
