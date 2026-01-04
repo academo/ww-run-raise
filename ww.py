@@ -3,11 +3,46 @@
 ww - Utility to raise or jump to applications in KDE.
 
 Compatible with KDE 6.x and Wayland, might also work on X11.
-Uses Python 3.13 but could benefit from Python 3.14 template strings.
+Written for Python 3.13 but could benefit from template strings in future.
+Required APT packages (Debian 13): python3 python3-dbus python3-gi
+
+Program Flow:
+-------------
+1. Python parses command-line arguments and determines window filters.
+
+2. Python generates a KWin JavaScript script from a template, substituting:
+   - Window filter criteria (class, caption, regex)
+   - Behavior flags (toggle, current desktop only)
+   - D-Bus address (if command launching is needed)
+
+3. Two execution paths:
+
+   A. With --command flag (launch if no window found):
+      - Python creates a temporary script file with D-Bus address
+      - Python sets up D-Bus message receiver and event loop
+      - Python loads and runs the script via KWin's D-Bus scripting interface
+      - KWin JavaScript searches for matching windows
+      - If no match: JavaScript sends "shouldLaunch=true" via D-Bus to Python
+      - If match found: JavaScript sends "shouldLaunch=false" and activates window
+      - Python receives D-Bus message, stops event loop
+      - Python stops the KWin script and deletes temporary file
+      - If shouldLaunch=true, Python launches the command via subprocess
+
+   B. Without --command flag (activate only):
+      - Python creates a temporary script file (no D-Bus address)
+      - Python loads and runs the script via KWin's D-Bus scripting interface
+      - KWin JavaScript searches for and activates matching window (no D-Bus callback)
+      - Python asynchronously stops the script in background (fire-and-forget)
+      - Python deletes the temporary file
+
+4. KWin JavaScript window activation logic:
+   - Finds all windows matching the filter criteria
+   - If one match: activates it (or toggles minimize if already active and --toggle set)
+   - If multiple matches: cycles based on stacking order (MRU when switching apps,
+     next window when already in the app)
 """
 
 import argparse
-import hashlib
 import os
 import re
 import subprocess
@@ -211,73 +246,46 @@ def render_script(class_name='', caption_name='', class_regex='',
 def activate_or_launch(filter_by='', filter_alt='', filter_regex='',
                       current_desktop_only=False, toggle=False, command=''):
     """Activate a window matching the given filters, or launch command if no match."""
-    # If we have a command, we need to use D-Bus to check if we should launch
-    if command:
-        receiver = DBusMessageReceiver()
-        receiver.register_handlers()
-
-        script_file = None
-        try:
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.js', delete=False) as f:
-                script_file = f.name
-                script_content = render_script(
-                    class_name=filter_by,
-                    caption_name=filter_alt,
-                    class_regex=filter_regex,
-                    toggle=toggle,
-                    current_desktop_only=current_desktop_only,
-                    dbus_addr=receiver.bus_name
-                )
-                f.write(script_content)
-
-            script = get_kwin_script_object(script_file)
-            script.run(dbus_interface='org.kde.kwin.Script')
-
-            # Wait for the response
-            receiver.wait_for_response()
-
-            # Stop the script
-            script.stop(dbus_interface='org.kde.kwin.Script')
-
-            if script_file and os.path.exists(script_file):
-                os.unlink(script_file)
-
-            # Launch command if needed
-            if receiver.should_launch:
-                subprocess.Popen(command, shell=True)
-
-        except Exception as e:
-            print(f"ERROR: Failed to activate or launch: {e}", file=sys.stderr)
-            if script_file and os.path.exists(script_file):
-                os.unlink(script_file)
-            sys.exit(1)
-    else:
-        # No command, just activate - use cached script
-        script_folder = Path(os.environ.get('XDG_CONFIG_HOME', Path.home())) / '.wwscripts'
-        script_folder.mkdir(exist_ok=True)
-
-        # Create a hash of the parameters to use as script name
-        info = f"{filter_by}{filter_alt}{filter_regex}{current_desktop_only}{toggle}"
-        script_hash = hashlib.md5(info.encode()).hexdigest()[:32]
-        script_path = script_folder / script_hash
-
-        # Ensure script file exists
-        if not script_path.exists():
+    script_file = None
+    try:
+        # Create temporary script file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.js', delete=False) as f:
+            script_file = f.name
+            
+            # If we have a command, we need D-Bus communication
+            if command:
+                receiver = DBusMessageReceiver()
+                receiver.register_handlers()
+                dbus_addr = receiver.bus_name
+            else:
+                dbus_addr = ''
+            
             script_content = render_script(
                 class_name=filter_by,
                 caption_name=filter_alt,
                 class_regex=filter_regex,
                 toggle=toggle,
                 current_desktop_only=current_desktop_only,
-                dbus_addr=''
+                dbus_addr=dbus_addr
             )
-            script_path.write_text(script_content)
+            f.write(script_content)
 
-        try:
-            script = get_kwin_script_object(str(script_path))
-            script.run(dbus_interface='org.kde.kwin.Script')
+        # Load and run the script
+        script = get_kwin_script_object(script_file)
+        script.run(dbus_interface='org.kde.kwin.Script')
 
-            # Stop the script in background
+        if command:
+            # Wait for the response from KWin script
+            receiver.wait_for_response()
+            
+            # Stop the script
+            script.stop(dbus_interface='org.kde.kwin.Script')
+            
+            # Launch command if needed
+            if receiver.should_launch:
+                subprocess.Popen(command, shell=True)
+        else:
+            # Stop the script in background (fire-and-forget)
             script_path_dbus = script.object_path
             subprocess.Popen(
                 ['dbus-send', '--session', '--dest=org.kde.KWin', '--print-reply=literal',
@@ -286,9 +294,13 @@ def activate_or_launch(filter_by='', filter_alt='', filter_regex='',
                 stderr=subprocess.DEVNULL
             )
 
-        except Exception as e:
-            print(f"ERROR: Failed to activate window: {e}", file=sys.stderr)
-            sys.exit(1)
+    except Exception as e:
+        print(f"ERROR: Failed to activate or launch: {e}", file=sys.stderr)
+        sys.exit(1)
+    finally:
+        # Clean up temporary file
+        if script_file and os.path.exists(script_file):
+            os.unlink(script_file)
 
 
 def main():
