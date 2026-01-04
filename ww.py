@@ -27,6 +27,54 @@ except ImportError:
     sys.exit(1)
 
 
+@dataclass
+class DBusMessageReceiver:
+    """Receive D-Bus messages from KWin scripts."""
+
+    match_count: int | None = None
+    window_info: str | None = None
+    loop: GLib.MainLoop | None = None
+    bus: dbus.SessionBus = field(init=False)
+    bus_name: str = field(init=False)
+
+    def __post_init__(self):
+        """Initialize D-Bus connection after dataclass initialization."""
+        DBusGMainLoop(set_as_default=True)
+        self.bus = dbus.SessionBus()
+        self.bus_name = self.bus.get_unique_name()
+
+    def match_count_handler(self, count_str):
+        """Handle matchCount message from KWin script."""
+        self.match_count = int(count_str)
+        if self.loop:
+            self.loop.quit()
+
+    def window_info_handler(self, info_str):
+        """Handle windowInfo message from KWin script."""
+        self.window_info = info_str
+        if self.loop:
+            self.loop.quit()
+
+    def register_handlers(self):
+        """Register D-Bus method handlers."""
+        self.bus.add_message_filter(self._message_filter)
+
+    def _message_filter(self, bus, message):
+        """Filter incoming D-Bus messages."""
+        match message.get_member():
+            case 'matchCount' if (args := message.get_args_list()):
+                self.match_count_handler(args[0])
+            case 'windowInfo' if (args := message.get_args_list()):
+                self.window_info_handler(args[0])
+        return dbus.lowlevel.HANDLER_RESULT_HANDLED
+
+    def wait_for_response(self, timeout_ms=5000):
+        """Wait for a response from the KWin script."""
+        self.loop = GLib.MainLoop()
+        GLib.timeout_add(timeout_ms, lambda: self.loop.quit())
+        self.loop.run()
+
+
 SCRIPT_TEMPLATE = Template("""
 function findMatchingClients(clientClass, clientCaption, clientClassRegex, currentDesktopOnly) {
     var clients = workspace.windowList();
@@ -130,7 +178,7 @@ function getActiveWindowInfo(dbusAddr) {
         callDBus(dbusAddr, "/", "", "windowInfo", "No active window");
         return;
     }
-    
+
     var info = "Window Class: " + (client.resourceClass || "N/A") + "\\n";
     info += "Window Caption: " + (client.caption || "N/A") + "\\n";
     info += "Window ID: " + (client.internalId || "N/A") + "\\n";
@@ -138,7 +186,7 @@ function getActiveWindowInfo(dbusAddr) {
     info += "On All Desktops: " + (client.onAllDesktops || false) + "\\n";
     info += "Minimized: " + (client.minimized || false) + "\\n";
     info += "Fullscreen: " + (client.fullScreen || false);
-    
+
     callDBus(dbusAddr, "/", "", "windowInfo", info);
 }
 getActiveWindowInfo('$dbus_addr');
@@ -238,54 +286,6 @@ def render_script_content(class_name='', caption_name='', class_regex='',
         detection_only='true' if detection_only else 'false',
         dbus_addr=dbus_addr
     )
-
-
-@dataclass
-class DBusMessageReceiver:
-    """Receive D-Bus messages from KWin scripts."""
-    
-    match_count: int | None = None
-    window_info: str | None = None
-    loop: GLib.MainLoop | None = None
-    bus: dbus.SessionBus = field(init=False)
-    bus_name: str = field(init=False)
-    
-    def __post_init__(self):
-        """Initialize D-Bus connection after dataclass initialization."""
-        DBusGMainLoop(set_as_default=True)
-        self.bus = dbus.SessionBus()
-        self.bus_name = self.bus.get_unique_name()
-
-    def match_count_handler(self, count_str):
-        """Handle matchCount message from KWin script."""
-        self.match_count = int(count_str)
-        if self.loop:
-            self.loop.quit()
-
-    def window_info_handler(self, info_str):
-        """Handle windowInfo message from KWin script."""
-        self.window_info = info_str
-        if self.loop:
-            self.loop.quit()
-
-    def register_handlers(self):
-        """Register D-Bus method handlers."""
-        self.bus.add_message_filter(self._message_filter)
-
-    def _message_filter(self, bus, message):
-        """Filter incoming D-Bus messages."""
-        match message.get_member():
-            case 'matchCount' if (args := message.get_args_list()):
-                self.match_count_handler(args[0])
-            case 'windowInfo' if (args := message.get_args_list()):
-                self.window_info_handler(args[0])
-        return dbus.lowlevel.HANDLER_RESULT_HANDLED
-
-    def wait_for_response(self, timeout_ms=5000):
-        """Wait for a response from the KWin script."""
-        self.loop = GLib.MainLoop()
-        GLib.timeout_add(timeout_ms, lambda: self.loop.quit())
-        self.loop.run()
 
 
 def get_matching_window_count(filter_by='', filter_alt='', filter_regex='',
