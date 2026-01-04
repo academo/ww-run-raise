@@ -167,8 +167,12 @@ function findMatchingClients(clientClass, clientCaption, clientClassRegex, curre
 function kwinactivateclient(clientClass, clientCaption, clientClassRegex, toggle, currentDesktopOnly, detectionOnly, detectionToken) {
     var matchingClients = findMatchingClients(clientClass, clientCaption, clientClassRegex, currentDesktopOnly);
 
-    if (detectionOnly) {
+    if (detectionOnly && matchingClients.length === 0) {
         print("ww-detect " + detectionToken + " " + matchingClients.length);
+        return;
+    }
+
+    if (detectionOnly) {
         return;
     }
 
@@ -264,7 +268,7 @@ function ensure_script {
 	if [[ ! -f "$SCRIPT_PATH" ]]; then
 		if [[ ! -d "$SCRIPT_FOLDER" ]]; then
 			mkdir -p "$SCRIPT_FOLDER"
-		fi
+			fi
 		render_script_content "$1" "$2" "$3" "$4" "$5" "false" "" >"$SCRIPT_PATH"
 	fi
 }
@@ -343,9 +347,13 @@ function kwin_matching_window_count() {
 	rm -f "$script_file"
 
 	local count
-	count=$(awk '{print $4}' <<< "$detection_line")
-	if [[ -z "$count" ]]; then
-		count=0
+	if [[ -n "$detection_line" ]]; then
+		count=$(awk '{print $4}' <<< "$detection_line")
+		if [[ -z "$count" ]]; then
+			count=0
+		fi
+	else
+		count=1
 	fi
 
 	echo "$count"
