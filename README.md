@@ -1,96 +1,55 @@
-ww. Utility to raise or jump an applications in KDE.
+# jumpkwapp
 
-It interacts with KWin using KWin scripts and it is compatible with X11 and Wayland. It also works with multiple screens.
+Run or raise utility for KDE Plasma 6 on Wayland.
 
-It is intended as a wmctrl alternative (only for the raising windows part)
+Initially forked from [ww-run-or-raise](https://github.com/academo/ww-run-raise) with modifications to add more features from X11 [jumpapp](https://github.com/mkropat/jumpapp). Also got some inspiration from [kdotools](https://github.com/jinliu/kdotool) for the DBus communication part.
 
-- Compatible with KDE 5.x and 6.x
-- Compatible with Wayland and X11
+Might also work on X11 as is and with minor modifications on Plasma 5.
 
-# Installing
+## Features
 
-- Download ww from this repository
-- Copy `ww` into your path. e.g.:
+- Filter windows by exact class, class regex, or caption match.
+- Can restrict matches to the current virtual desktop.
+- Optional toggle mode to minimize if the active window already matches.
+- Optionally runs a command when no matching window exists.
+
+## Installation
+
+Using Python 3.13 and D-Bus modules installable from Debian 13 package manager.
 
 ```bash
-cp ww /usr/local/bin
+sudo apt install python3-gi python3-dbus
+cp jumpkwapp /usr/local/bin  # or any directory in $PATH
 ```
 
-Feel free to rename it
+Similar packages are probably available in other distros but might be named differently.
 
-# Usage
-
-ww only works in KDE. It works in X11 and Wayland.
-
-## Example
-
-if you want to raise or jump to an open firefox window:
-
-`ww -f firefox -c firefox`
-
-if you want to raise or jump to an app with an specific class:
-
-`ww -f kitty.terminal -c 'kitty --class kitty.terminal'`
-
-Note: In this example `kitty` allows you to pass the `class` option that sets the window class.
-This is a kitty feature, not a ww feature.
-
-if you want to raise any window that matches a title (supports JS regexp):
-
-`ww -fa 'Zoom meeting'`
-
-if you want to raise or jump to a window using a regex pattern for the class:
-
-`ww -fr '^firefox'`
-
-if you want to toggle (minimize if active) a window:
-
-`ww -f firefox -c firefox -t`
-
-if you want to see information about the currently active window:
-
-`ww -ia`
-
-## Parameters:
+## Usage
 
 ```
--h  --help                show this help
--ia --info-active         show information about the active window
--f  --filter              filter by window class (exact match)
--fa --filter-alternative  filter by window title (caption)
--fr --filter-regex        filter by window class using regex pattern
--d  --current-desktop     only consider windows that are on the current virtual desktop
--t  --toggle              also minimize the window if it is already active
--c  --command             command to check if running and run if no process is found
--p  --process             override the process name used when checking if running, defaults to --command
--u  --current-user        will only search processes of the current user (requires loginctl)
+jumpkwapp [options]
+
+-f, --filter             Match window class (exact)
+-fa, --filter-alternative  Match window caption (regex, case-insensitive)
+-fr, --filter-regex      Match window class (regex)
+-d, --current-desktop    Only consider windows on the current desktop
+-t, --toggle             Minimize the window if it is already active
+-c, --command CMD        Launch CMD if no window matches
 ```
 
-# Create shortcuts
+### Examples
 
-You can use KDE custom shortcuts to add a custom shortcut that calls ww
+- Raise an existing LibreWolf window in current virtual desktop or start it if missing:
+```
+jumpkwapp -f librewolf -c librewolf --current-desktop
+```
 
-![image](https://user-images.githubusercontent.com/227916/126187702-90105aff-32a4-48dd-95c9-a7c1a2623c9e.png)
+Setup the hotkey in KDE's Shortcut settings panel.
 
-# How does it work?
+## Development
 
-Internally ww uses 2 main things to work: `pgrep` and "on demand" KWin scripts.
+See `DEBUGGING.md` for tips on inspecting KWin state.
 
-When you run, for example `ww -f firefox -c firefox`, ww tries to find a process running with the specified process name:
+# License
 
-`pgrep -o -f firefox`
-
-This detects if the application is running or not.
-
-Then ww creates a file inside `~/.wwscripts` to store a temporary kwin script, it loads the script, runs it, stops it and unloads it in a single go.
-
-The kwin script is targeted to find and focus a specific window.
-
-The `-ia` option works differently: it uses KWin's scripting API to query information about the currently active window without needing to filter or launch anything.
-
-# TODO
-
-Here some ideas of improvements that I'd like to explore, but my knowledge on kwin scripts doesn't allow me:
-
-- Do not depend on pgrep to detect if an application is open?
-- Use a single kwin script with signals instead of loading and running one each time?
+MIT licensed but the original `ww` Bash script which remains in repo history didn't have a license defined at the time.

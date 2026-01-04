@@ -1,0 +1,350 @@
+#!/usr/bin/env python3
+"""
+jumpkwapp
+Utility to raise or jump to applications in KWin 6 / Wayland inspired by
+X11 jumpapp (https://github.com/mkropat/jumpapp)
+
+KWin / Wayland support inspired by:
+- https://github.com/academo/ww-run-raise (fork)
+- https://github.com/jinliu/kdotool (dbus communication)
+
+Compatible with KDE 6.x and Wayland, might also work on X11 (not tested).
+Written for Python 3.13 but could benefit from template strings in future.
+Required APT packages (Debian 13): python3 python3-dbus python3-gi
+
+Program Flow:
+-------------
+1. Python parses command-line arguments and determines window filters.
+
+2. Python generates a KWin JavaScript script from a template, substituting:
+   - Window filter criteria (class, caption, regex)
+   - Behavior flags (toggle, current desktop only)
+   - D-Bus address (if command launching is needed)
+
+3. Two execution paths:
+
+   A. With --command flag (launch if no window found):
+      - Python creates a temporary script file with D-Bus address
+      - Python sets up D-Bus message receiver and event loop
+      - Python loads and runs the script via KWin's D-Bus scripting interface
+      - KWin JavaScript searches for matching windows
+      - If no match: JavaScript sends "shouldLaunch=true" via D-Bus to Python
+      - If match found: JavaScript sends "shouldLaunch=false" and activates window
+      - Python receives D-Bus message, stops event loop
+      - Python stops the KWin script and deletes temporary file
+      - If shouldLaunch=true, Python launches the command via subprocess
+
+   B. Without --command flag (activate only):
+      - Python creates a temporary script file (no D-Bus address)
+      - Python loads and runs the script via KWin's D-Bus scripting interface
+      - KWin JavaScript searches for and activates matching window (no D-Bus callback)
+      - Python asynchronously stops the script in background (fire-and-forget)
+      - Python deletes the temporary file
+
+4. KWin JavaScript window activation logic:
+   - Finds all windows matching the filter criteria
+   - If one match: activates it (or toggles minimize if already active and --toggle set)
+   - If multiple matches: cycles based on stacking order (MRU when switching apps,
+     next window when already in the app)
+"""
+
+import argparse
+import os
+import re
+import subprocess
+import sys
+import tempfile
+from dataclasses import dataclass, field
+from pathlib import Path
+from string import Template
+
+try:
+    import dbus
+    from dbus.mainloop.glib import DBusGMainLoop
+    from gi.repository import GLib
+except ImportError:
+    print("ERROR: Required Python packages not found.", file=sys.stderr)
+    print("Please install: python3-dbus python3-gi", file=sys.stderr)
+    sys.exit(1)
+
+
+@dataclass
+class DBusMessageReceiver:
+    """Receive D-Bus messages from KWin scripts."""
+
+    should_launch: bool | None = None
+    loop: GLib.MainLoop | None = None
+    bus: dbus.SessionBus = field(init=False)
+    bus_name: str = field(init=False)
+
+    def __post_init__(self):
+        """Initialize D-Bus connection after dataclass initialization."""
+        DBusGMainLoop(set_as_default=True)
+        self.bus = dbus.SessionBus()
+        self.bus_name = self.bus.get_unique_name()
+
+    def should_launch_handler(self, should_launch_str):
+        """Handle shouldLaunch message from KWin script."""
+        self.should_launch = should_launch_str.lower() == 'true'
+        if self.loop:
+            self.loop.quit()
+
+    def register_handlers(self):
+        """Register D-Bus method handlers."""
+        self.bus.add_message_filter(self._message_filter)
+
+    def _message_filter(self, bus, message):
+        """Filter incoming D-Bus messages."""
+        match message.get_member():
+            case 'shouldLaunch' if (args := message.get_args_list()):
+                self.should_launch_handler(args[0])
+        return dbus.lowlevel.HANDLER_RESULT_HANDLED
+
+    def wait_for_response(self, timeout_ms=5000):
+        """Wait for a response from the KWin script."""
+        self.loop = GLib.MainLoop()
+        GLib.timeout_add(timeout_ms, lambda: self.loop.quit())
+        self.loop.run()
+
+
+SCRIPT_TEMPLATE = Template("""
+/**
+ * Checks if given window is on the current virtual desktop.
+ * @param {KWin::XdgToplevelWindow|KWin::X11Window} client Window to inspect
+ * @return {boolean} True if window is on the current desktop or on all desktops
+ */
+function isOnCurrentDesktop(client) {
+    if (client.onAllDesktops) {
+        return true;
+    }
+    if (workspace.currentDesktop !== undefined && client.desktops !== undefined ){
+        return client.desktops.includes(workspace.currentDesktop);
+    }
+    return true; // fallback if API mismatch
+}
+
+/**
+ * Find all windows matching the specified filters.
+ * @param {string} clientClass Window class to match (exact match)
+ * @param {string} clientCaption Window caption/title to match (regex, case-insensitive)
+ * @param {string} clientClassRegex Window class regex pattern to match
+ * @param {boolean} currentDesktopOnly If true, only include windows on current desktop
+ * @return {Array<KWin::XdgToplevelWindow|KWin::X11Window>} Array of matching windows
+ */
+function findMatchingClients(clientClass, clientCaption, clientClassRegex, currentDesktopOnly) {
+    var clients = workspace.windowList();
+    var compareToCaption = new RegExp(clientCaption || '', 'i');
+    var compareToClassRegex = clientClassRegex.length > 0 ? new RegExp(clientClassRegex) : null;
+    var compareToClass = clientClass;
+    var isCompareToClass = clientClass.length > 0;
+    var isCompareToRegex = compareToClassRegex !== null;
+    var matchingClients = [];
+
+    for (var i = 0; i < clients.length; i++) {
+        var client = clients[i];
+        var classCompare = (isCompareToClass && client.resourceClass == compareToClass);
+        var classRegexCompare = (isCompareToRegex && compareToClassRegex && compareToClassRegex.exec(client.resourceClass));
+        var captionCompare = (!isCompareToClass && !isCompareToRegex && compareToCaption.exec(client.caption));
+        if (classCompare || classRegexCompare || captionCompare) {
+            if (currentDesktopOnly && !isOnCurrentDesktop(client)) {
+                continue;
+            }
+            matchingClients.push(client);
+        }
+    }
+
+    return matchingClients;
+}
+
+/**
+ * Set the specified window as the active window.
+ * @param {KWin::XdgToplevelWindow|KWin::X11Window} client Window to activate
+ */
+function setActiveClient(client){
+    workspace.activeWindow = client;
+}
+
+/**
+ * Activate a window matching the specified filters, or signal via D-Bus if no match found.
+ * When multiple windows match, cycles through them based on current focus state.
+ * @param {string} clientClass Window class to match (exact match)
+ * @param {string} clientCaption Window caption/title to match (regex, case-insensitive)
+ * @param {string} clientClassRegex Window class regex pattern to match
+ * @param {boolean} toggle If true, minimize the window if it's already active
+ * @param {boolean} currentDesktopOnly If true, only match windows on current desktop
+ * @param {string} dbusAddr D-Bus address to signal if no windows found (empty string to disable)
+ */
+function kwinActivateClient(clientClass, clientCaption, clientClassRegex, toggle, currentDesktopOnly, dbusAddr) {
+    var matchingClients = findMatchingClients(clientClass, clientCaption, clientClassRegex, currentDesktopOnly);
+
+    if (matchingClients.length === 0) {
+        if (dbusAddr) {
+            callDBus(dbusAddr, "/", "", "shouldLaunch", "true");
+        }
+        return;
+    }
+
+    if (dbusAddr) {
+        callDBus(dbusAddr, "/", "", "shouldLaunch", "false");
+    }
+
+    var activeWindow = workspace.activeWindow;
+
+    if (matchingClients.length === 1) {
+        var client = matchingClients[0];
+        if (activeWindow !== client) {
+            setActiveClient(client);
+        } else if (toggle) {
+            client.minimized = !client.minimized;
+        }
+    } else if (matchingClients.length > 1) {
+        // Check if the active window is one of the matching windows
+        var activeIsMatching = false;
+        for (var j = 0; j < matchingClients.length; j++) {
+            if (activeWindow === matchingClients[j]) {
+                activeIsMatching = true;
+                break;
+            }
+        }
+
+        // Always sort by stacking order
+        matchingClients.sort(function (a, b) {
+            return a.stackingOrder - b.stackingOrder;
+        });
+
+        if (activeIsMatching) {
+            // We're already in this app - cycle through windows (pick first)
+            const client = matchingClients[0];
+            setActiveClient(client);
+        } else {
+            // We're switching from another app - pick most recently active (last)
+            const client = matchingClients[matchingClients.length - 1];
+            setActiveClient(client);
+        }
+    }
+}
+
+kwinActivateClient('$class_name', '$caption_name', '$class_regex', $toggle, $current_desktop_only, '$dbus_addr');
+""")
+
+
+def get_kwin_script_object(script_file):
+    """Load and return a KWin script object."""
+    bus = dbus.SessionBus()
+    kwin_scripting = bus.get_object('org.kde.KWin', '/Scripting')
+    script_id = kwin_scripting.loadScript(script_file, dbus_interface='org.kde.kwin.Scripting')
+    return bus.get_object('org.kde.KWin', f"/Scripting/Script{script_id}")
+
+
+def render_script(class_name='', caption_name='', class_regex='',
+                 toggle=False, current_desktop_only=False, dbus_addr=''):
+    """Render the KWin script with the given parameters."""
+    return SCRIPT_TEMPLATE.substitute(
+        class_name=class_name,
+        caption_name=caption_name,
+        class_regex=class_regex,
+        toggle='true' if toggle else 'false',
+        current_desktop_only='true' if current_desktop_only else 'false',
+        dbus_addr=dbus_addr
+    )
+
+
+def activate_or_launch(filter_by='', filter_alt='', filter_regex='',
+                      current_desktop_only=False, toggle=False, command=''):
+    """Activate a window matching the given filters, or launch command if no match."""
+    script_file = None
+    try:
+        # Create temporary script file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.js', delete=False) as f:
+            script_file = f.name
+
+            # If we have a command, we need D-Bus communication
+            if command:
+                receiver = DBusMessageReceiver()
+                receiver.register_handlers()
+                dbus_addr = receiver.bus_name
+            else:
+                dbus_addr = ''
+
+            script_content = render_script(
+                class_name=filter_by,
+                caption_name=filter_alt,
+                class_regex=filter_regex,
+                toggle=toggle,
+                current_desktop_only=current_desktop_only,
+                dbus_addr=dbus_addr
+            )
+            f.write(script_content)
+
+        # Load and run the script
+        script = get_kwin_script_object(script_file)
+        script.run(dbus_interface='org.kde.kwin.Script')
+
+        if command:
+            # Wait for the response from KWin script
+            receiver.wait_for_response()
+
+            # Stop the script
+            script.stop(dbus_interface='org.kde.kwin.Script')
+
+            # Launch command if needed
+            if receiver.should_launch:
+                subprocess.Popen(command, shell=True)
+        else:
+            # Stop the script in background (fire-and-forget)
+            script_path_dbus = script.object_path
+            subprocess.Popen(
+                ['dbus-send', '--session', '--dest=org.kde.KWin', '--print-reply=literal',
+                 script_path_dbus, 'org.kde.kwin.Script.stop'],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+
+    except Exception as e:
+        print(f"ERROR: Failed to activate or launch: {e}", file=sys.stderr)
+        sys.exit(1)
+    finally:
+        # Clean up temporary file
+        if script_file and os.path.exists(script_file):
+            os.unlink(script_file)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description='jumpkwapp - Utility to raise or jump to applications in KWin 6',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+
+    parser.add_argument('-f', '--filter', dest='filter_by', default='',
+                       help='filter by window class (exact match)')
+    parser.add_argument('-fa', '--filter-alternative', dest='filter_alt', default='',
+                       help='filter by window title (caption)')
+    parser.add_argument('-fr', '--filter-regex', dest='filter_regex', default='',
+                       help='filter by window class using regex pattern')
+    parser.add_argument('-d', '--current-desktop', action='store_true',
+                       help='only match windows on the current virtual desktop')
+    parser.add_argument('-t', '--toggle', action='store_true',
+                       help='also minimize the window if it is already active')
+    parser.add_argument('-c', '--command', default='',
+                       help='command to run when no matching window is found')
+
+    args = parser.parse_args()
+
+    if not args.filter_by and not args.filter_alt and not args.filter_regex:
+        print("ERROR: You need to specify a window filter — either by class (-f), "
+              "by title (-fa), or by regex (-fr).", file=sys.stderr)
+        print("Use --help for more information.", file=sys.stderr)
+        sys.exit(1)
+
+    activate_or_launch(
+        filter_by=args.filter_by,
+        filter_alt=args.filter_alt,
+        filter_regex=args.filter_regex,
+        current_desktop_only=args.current_desktop,
+        toggle=args.toggle,
+        command=args.command
+    )
+
+
+if __name__ == '__main__':
+    main()
