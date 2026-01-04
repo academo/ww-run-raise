@@ -13,6 +13,7 @@ import re
 import subprocess
 import sys
 import tempfile
+from dataclasses import dataclass, field
 from pathlib import Path
 from string import Template
 
@@ -239,13 +240,18 @@ def render_script_content(class_name='', caption_name='', class_regex='',
     )
 
 
+@dataclass
 class DBusMessageReceiver:
     """Receive D-Bus messages from KWin scripts."""
-
-    def __init__(self):
-        self.match_count = None
-        self.window_info = None
-        self.loop = None
+    
+    match_count: int | None = None
+    window_info: str | None = None
+    loop: GLib.MainLoop | None = None
+    bus: dbus.SessionBus = field(init=False)
+    bus_name: str = field(init=False)
+    
+    def __post_init__(self):
+        """Initialize D-Bus connection after dataclass initialization."""
         DBusGMainLoop(set_as_default=True)
         self.bus = dbus.SessionBus()
         self.bus_name = self.bus.get_unique_name()
