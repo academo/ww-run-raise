@@ -149,7 +149,8 @@ def get_kwin_version():
     cache_file = Path(f"/tmp/ww_kwin_version_{os.getuid()}")
 
     if cache_file.exists():
-        return cache_file.read_text().strip()
+        if version := cache_file.read_text().strip():
+            return version
 
     try:
         bus = dbus.SessionBus()
@@ -267,14 +268,10 @@ class DBusMessageReceiver:
 
     def _message_filter(self, bus, message):
         """Filter incoming D-Bus messages."""
-        member = message.get_member()
-        if member == 'matchCount':
-            args = message.get_args_list()
-            if args:
+        match message.get_member():
+            case 'matchCount' if (args := message.get_args_list()):
                 self.match_count_handler(args[0])
-        elif member == 'windowInfo':
-            args = message.get_args_list()
-            if args:
+            case 'windowInfo' if (args := message.get_args_list()):
                 self.window_info_handler(args[0])
         return dbus.lowlevel.HANDLER_RESULT_HANDLED
 
@@ -340,8 +337,7 @@ def get_matching_window_count(filter_by='', filter_alt='', filter_regex='',
 def activate_window(filter_by='', filter_alt='', filter_regex='',
                    current_desktop_only=False, toggle=False):
     """Activate a window matching the given filters."""
-    script_folder_root = os.environ.get('XDG_CONFIG_HOME', os.path.expanduser('~'))
-    script_folder = Path(script_folder_root) / '.wwscripts'
+    script_folder = Path(os.environ.get('XDG_CONFIG_HOME', Path.home())) / '.wwscripts'
     script_folder.mkdir(exist_ok=True)
 
     # Create a hash of the parameters to use as script name
