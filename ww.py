@@ -31,7 +31,7 @@ except ImportError:
 class DBusMessageReceiver:
     """Receive D-Bus messages from KWin scripts."""
 
-    has_matches: bool | None = None
+    should_launch: bool | None = None
     loop: GLib.MainLoop | None = None
     bus: dbus.SessionBus = field(init=False)
     bus_name: str = field(init=False)
@@ -42,9 +42,9 @@ class DBusMessageReceiver:
         self.bus = dbus.SessionBus()
         self.bus_name = self.bus.get_unique_name()
 
-    def has_matches_handler(self, has_matches_str):
-        """Handle hasMatches message from KWin script."""
-        self.has_matches = has_matches_str.lower() == 'true'
+    def should_launch_handler(self, should_launch_str):
+        """Handle shouldLaunch message from KWin script."""
+        self.should_launch = should_launch_str.lower() == 'true'
         if self.loop:
             self.loop.quit()
 
@@ -55,8 +55,8 @@ class DBusMessageReceiver:
     def _message_filter(self, bus, message):
         """Filter incoming D-Bus messages."""
         match message.get_member():
-            case 'hasMatches' if (args := message.get_args_list()):
-                self.has_matches_handler(args[0])
+            case 'shouldLaunch' if (args := message.get_args_list()):
+                self.should_launch_handler(args[0])
         return dbus.lowlevel.HANDLER_RESULT_HANDLED
 
     def wait_for_response(self, timeout_ms=5000):
@@ -92,17 +92,18 @@ function findMatchingClients(clientClass, clientCaption, clientClassRegex, curre
     return matchingClients;
 }
 
-function kwinactivateclient(clientClass, clientCaption, clientClassRegex, toggle, currentDesktopOnly, detectionOnly, dbusAddr) {
+function kwinactivateclient(clientClass, clientCaption, clientClassRegex, toggle, currentDesktopOnly, dbusAddr) {
     var matchingClients = findMatchingClients(clientClass, clientCaption, clientClassRegex, currentDesktopOnly);
 
-    if (detectionOnly) {
-        var hasMatches = matchingClients.length > 0;
-        callDBus(dbusAddr, "/", "", "hasMatches", hasMatches.toString());
+    if (matchingClients.length === 0) {
+        if (dbusAddr) {
+            callDBus(dbusAddr, "/", "", "shouldLaunch", "true");
+        }
         return;
     }
 
-    if (matchingClients.length === 0) {
-        return;
+    if (dbusAddr) {
+        callDBus(dbusAddr, "/", "", "shouldLaunch", "false");
     }
 
     var activeWindow = workspace.activeWindow;
@@ -159,7 +160,8 @@ function isOnCurrentDesktop(client) {
 function setActiveClient(client){
     workspace.activeWindow = client;
 }
-kwinactivateclient('$class_name', '$caption_name', '$class_regex', $toggle, $current_desktop_only, $detection_only, '$dbus_addr');
+
+kwinactivateclient('$class_name', '$caption_name', '$class_regex', $toggle, $current_desktop_only, '$dbus_addr');
 """)
 
 
@@ -171,9 +173,8 @@ def get_kwin_script_object(script_file):
     return bus.get_object('org.kde.KWin', f"/Scripting/Script{script_id}")
 
 
-def render_script_content(class_name='', caption_name='', class_regex='',
-                         toggle=False, current_desktop_only=False,
-                         detection_only=False, dbus_addr=''):
+def render_script(class_name='', caption_name='', class_regex='',
+                 toggle=False, current_desktop_only=False, dbus_addr=''):
     """Render the KWin script with the given parameters."""
     return SCRIPT_TEMPLATE.substitute(
         class_name=class_name,
@@ -181,93 +182,91 @@ def render_script_content(class_name='', caption_name='', class_regex='',
         class_regex=class_regex,
         toggle='true' if toggle else 'false',
         current_desktop_only='true' if current_desktop_only else 'false',
-        detection_only='true' if detection_only else 'false',
         dbus_addr=dbus_addr
     )
 
 
-def has_matching_windows(filter_by='', filter_alt='', filter_regex='',
-                         current_desktop_only=False, toggle=False):
-    """Query KWin to check if there are any matching windows using D-Bus."""
-    receiver = DBusMessageReceiver()
-    receiver.register_handlers()
+def activate_or_launch(filter_by='', filter_alt='', filter_regex='',
+                      current_desktop_only=False, toggle=False, command=''):
+    """Activate a window matching the given filters, or launch command if no match."""
+    # If we have a command, we need to use D-Bus to check if we should launch
+    if command:
+        receiver = DBusMessageReceiver()
+        receiver.register_handlers()
 
-    script_file = None
-    try:
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.js', delete=False) as f:
-            script_file = f.name
-            script_content = render_script_content(
+        script_file = None
+        try:
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.js', delete=False) as f:
+                script_file = f.name
+                script_content = render_script(
+                    class_name=filter_by,
+                    caption_name=filter_alt,
+                    class_regex=filter_regex,
+                    toggle=toggle,
+                    current_desktop_only=current_desktop_only,
+                    dbus_addr=receiver.bus_name
+                )
+                f.write(script_content)
+
+            script = get_kwin_script_object(script_file)
+            script.run(dbus_interface='org.kde.kwin.Script')
+
+            # Wait for the response
+            receiver.wait_for_response()
+
+            # Stop the script
+            script.stop(dbus_interface='org.kde.kwin.Script')
+
+            if script_file and os.path.exists(script_file):
+                os.unlink(script_file)
+
+            # Launch command if needed
+            if receiver.should_launch:
+                subprocess.Popen(command, shell=True)
+
+        except Exception as e:
+            print(f"ERROR: Failed to activate or launch: {e}", file=sys.stderr)
+            if script_file and os.path.exists(script_file):
+                os.unlink(script_file)
+            sys.exit(1)
+    else:
+        # No command, just activate - use cached script
+        script_folder = Path(os.environ.get('XDG_CONFIG_HOME', Path.home())) / '.wwscripts'
+        script_folder.mkdir(exist_ok=True)
+
+        # Create a hash of the parameters to use as script name
+        info = f"{filter_by}{filter_alt}{filter_regex}{current_desktop_only}{toggle}"
+        script_hash = hashlib.md5(info.encode()).hexdigest()[:32]
+        script_path = script_folder / script_hash
+
+        # Ensure script file exists
+        if not script_path.exists():
+            script_content = render_script(
                 class_name=filter_by,
                 caption_name=filter_alt,
                 class_regex=filter_regex,
                 toggle=toggle,
                 current_desktop_only=current_desktop_only,
-                detection_only=True,
-                dbus_addr=receiver.bus_name
+                dbus_addr=''
             )
-            f.write(script_content)
+            script_path.write_text(script_content)
 
-        script = get_kwin_script_object(script_file)
-        script.run(dbus_interface='org.kde.kwin.Script')
+        try:
+            script = get_kwin_script_object(str(script_path))
+            script.run(dbus_interface='org.kde.kwin.Script')
 
-        # Wait for the response
-        receiver.wait_for_response()
+            # Stop the script in background
+            script_path_dbus = script.object_path
+            subprocess.Popen(
+                ['dbus-send', '--session', '--dest=org.kde.KWin', '--print-reply=literal',
+                 script_path_dbus, 'org.kde.kwin.Script.stop'],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
 
-        # Stop the script
-        script.stop(dbus_interface='org.kde.kwin.Script')
-
-        if script_file and os.path.exists(script_file):
-            os.unlink(script_file)
-
-        return receiver.has_matches if receiver.has_matches is not None else False
-
-    except Exception as e:
-        print(f"ERROR: Failed to query KWin: {e}", file=sys.stderr)
-        if script_file and os.path.exists(script_file):
-            os.unlink(script_file)
-        return False
-
-
-def activate_window(filter_by='', filter_alt='', filter_regex='',
-                   current_desktop_only=False, toggle=False):
-    """Activate a window matching the given filters."""
-    script_folder = Path(os.environ.get('XDG_CONFIG_HOME', Path.home())) / '.wwscripts'
-    script_folder.mkdir(exist_ok=True)
-
-    # Create a hash of the parameters to use as script name
-    info = f"{filter_by}{filter_alt}{filter_regex}{current_desktop_only}{toggle}"
-    script_hash = hashlib.md5(info.encode()).hexdigest()[:32]
-    script_path = script_folder / script_hash
-
-    # Ensure script file exists
-    if not script_path.exists():
-        script_content = render_script_content(
-            class_name=filter_by,
-            caption_name=filter_alt,
-            class_regex=filter_regex,
-            toggle=toggle,
-            current_desktop_only=current_desktop_only,
-            detection_only=False,
-            dbus_addr=''
-        )
-        script_path.write_text(script_content)
-
-    try:
-        script = get_kwin_script_object(str(script_path))
-        script.run(dbus_interface='org.kde.kwin.Script')
-
-        # Stop the script in background
-        script_path_dbus = script.object_path
-        subprocess.Popen(
-            ['dbus-send', '--session', '--dest=org.kde.KWin', '--print-reply=literal',
-             script_path_dbus, 'org.kde.kwin.Script.stop'],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
-        )
-
-    except Exception as e:
-        print(f"ERROR: Failed to activate window: {e}", file=sys.stderr)
-        sys.exit(1)
+        except Exception as e:
+            print(f"ERROR: Failed to activate window: {e}", file=sys.stderr)
+            sys.exit(1)
 
 
 def main():
@@ -297,27 +296,13 @@ def main():
         print("Use --help for more information.", file=sys.stderr)
         sys.exit(1)
 
-    # Check if we need to launch the command
-    if args.command:
-        has_matches = has_matching_windows(
-            filter_by=args.filter_by,
-            filter_alt=args.filter_alt,
-            filter_regex=args.filter_regex,
-            current_desktop_only=args.current_desktop,
-            toggle=args.toggle
-        )
-
-        if not has_matches:
-            subprocess.Popen(args.command, shell=True)
-            return
-
-    # Activate the window
-    activate_window(
+    activate_or_launch(
         filter_by=args.filter_by,
         filter_alt=args.filter_alt,
         filter_regex=args.filter_regex,
         current_desktop_only=args.current_desktop,
-        toggle=args.toggle
+        toggle=args.toggle,
+        command=args.command
     )
 
 
