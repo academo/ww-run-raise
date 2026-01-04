@@ -219,6 +219,14 @@ def get_kwin_version():
     sys.exit(1)
 
 
+def get_kwin_script_object(script_file):
+    """Load and return a KWin script object."""
+    bus = dbus.SessionBus()
+    kwin_scripting = bus.get_object('org.kde.KWin', '/Scripting')
+    script_id = kwin_scripting.loadScript(script_file, dbus_interface='org.kde.kwin.Scripting')
+    return bus.get_object('org.kde.KWin', f"/Scripting/Script{script_id}")
+
+
 def get_active_window_info():
     """Get information about the active window."""
     kwin_version = get_kwin_version()
@@ -240,16 +248,7 @@ def get_active_window_info():
             )
             f.write(script_content)
 
-        bus = dbus.SessionBus()
-        kwin_scripting = bus.get_object('org.kde.KWin', '/Scripting')
-
-        script_id = kwin_scripting.loadScript(
-            script_file,
-            dbus_interface='org.kde.kwin.Scripting'
-        )
-
-        script_path = f"/Scripting/Script{script_id}"
-        script = bus.get_object('org.kde.KWin', script_path)
+        script = get_kwin_script_object(script_file)
         script.run(dbus_interface='org.kde.kwin.Script')
 
         # Wait for the response
@@ -309,17 +308,7 @@ def get_matching_window_count(filter_by='', filter_alt='', filter_regex='',
             )
             f.write(script_content)
 
-        bus = dbus.SessionBus()
-        kwin_scripting = bus.get_object('org.kde.KWin', '/Scripting')
-
-        # KDE 6 uses single argument loadScript
-        script_id = kwin_scripting.loadScript(
-            script_file,
-            dbus_interface='org.kde.kwin.Scripting'
-        )
-
-        script_path = f"/Scripting/Script{script_id}"
-        script = bus.get_object('org.kde.KWin', script_path)
+        script = get_kwin_script_object(script_file)
         script.run(dbus_interface='org.kde.kwin.Script')
 
         # Wait for the response
@@ -365,20 +354,11 @@ def activate_window(filter_by='', filter_alt='', filter_regex='',
         script_path.write_text(script_content)
 
     try:
-        bus = dbus.SessionBus()
-        kwin_scripting = bus.get_object('org.kde.KWin', '/Scripting')
-
-        # KDE 6 uses single argument loadScript
-        script_id = kwin_scripting.loadScript(
-            str(script_path),
-            dbus_interface='org.kde.kwin.Scripting'
-        )
-
-        script_path_dbus = f"/Scripting/Script{script_id}"
-        script = bus.get_object('org.kde.KWin', script_path_dbus)
+        script = get_kwin_script_object(str(script_path))
         script.run(dbus_interface='org.kde.kwin.Script')
 
         # Stop the script in background
+        script_path_dbus = script.object_path
         subprocess.Popen(
             ['dbus-send', '--session', '--dest=org.kde.KWin', '--print-reply=literal',
              script_path_dbus, 'org.kde.kwin.Script.stop'],
