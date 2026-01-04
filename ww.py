@@ -122,6 +122,28 @@ kwinactivateclient('$class_name', '$caption_name', '$class_regex', $toggle, $cur
 """)
 
 
+WINDOW_INFO_SCRIPT_TEMPLATE = Template("""
+function getActiveWindowInfo(dbusAddr) {
+    var client = workspace.activeWindow;
+    if (!client) {
+        callDBus(dbusAddr, "/", "", "windowInfo", "No active window");
+        return;
+    }
+    
+    var info = "Window Class: " + (client.resourceClass || "N/A") + "\\n";
+    info += "Window Caption: " + (client.caption || "N/A") + "\\n";
+    info += "Window ID: " + (client.internalId || "N/A") + "\\n";
+    info += "Desktop: " + (client.desktops ? client.desktops.map(d => d.name).join(", ") : "N/A") + "\\n";
+    info += "On All Desktops: " + (client.onAllDesktops || false) + "\\n";
+    info += "Minimized: " + (client.minimized || false) + "\\n";
+    info += "Fullscreen: " + (client.fullScreen || false);
+    
+    callDBus(dbusAddr, "/", "", "windowInfo", info);
+}
+getActiveWindowInfo('$dbus_addr');
+""")
+
+
 def get_kwin_version():
     """Get KWin version, cached in /tmp."""
     cache_file = Path(f"/tmp/ww_kwin_version_{os.getuid()}")
@@ -156,10 +178,17 @@ def get_active_window_info():
         print("ERROR: This feature needs KWin 6 or later.", file=sys.stderr)
         sys.exit(1)
 
+    receiver = DBusMessageReceiver()
+    receiver.register_handlers()
+
+    script_file = None
     try:
         with tempfile.NamedTemporaryFile(mode='w', suffix='.js', delete=False) as f:
             script_file = f.name
-            f.write('print(workspace.activeWindow.internalId);')
+            script_content = WINDOW_INFO_SCRIPT_TEMPLATE.substitute(
+                dbus_addr=receiver.bus_name
+            )
+            f.write(script_content)
 
         bus = dbus.SessionBus()
         kwin_scripting = bus.get_object('org.kde.KWin', '/Scripting')
@@ -173,47 +202,24 @@ def get_active_window_info():
         script = bus.get_object('org.kde.KWin', script_path)
         script.run(dbus_interface='org.kde.kwin.Script')
 
-        # Get window ID from journalctl
-        result = subprocess.run(
-            [
-                'journalctl',
-                '--since', 'now',
-                '--user',
-                '--user-unit=plasma-kwin_wayland.service',
-                '--user-unit=plasma-kwin_x11.service',
-                '--output=cat',
-                '-n', '10'
-            ],
-            capture_output=True,
-            text=True
-        )
-
-        window_id = None
-        for line in result.stdout.strip().split('\n'):
-            if 'js:' in line:
-                parts = line.split()
-                if len(parts) >= 2:
-                    window_id = parts[-1]
-                    break
+        # Wait for the response
+        receiver.wait_for_response()
 
         # Stop the script
         script.stop(dbus_interface='org.kde.kwin.Script')
-        os.unlink(script_file)
 
-        if window_id:
-            # Get window info using qdbus
-            qdbus_cmd = 'qdbus6' if subprocess.run(['which', 'qdbus6'],
-                                                   capture_output=True).returncode == 0 else 'qdbus'
+        if script_file and os.path.exists(script_file):
+            os.unlink(script_file)
 
-            result = subprocess.run(
-                [qdbus_cmd, 'org.kde.KWin', '/KWin', 'org.kde.KWin.getWindowInfo', window_id],
-                capture_output=True,
-                text=True
-            )
-            print(result.stdout)
+        if receiver.window_info:
+            print(receiver.window_info)
+        else:
+            print("ERROR: No window info received", file=sys.stderr)
 
     except Exception as e:
         print(f"ERROR: Failed to get active window info: {e}", file=sys.stderr)
+        if script_file and os.path.exists(script_file):
+            os.unlink(script_file)
         sys.exit(1)
 
 
@@ -237,6 +243,7 @@ class DBusMessageReceiver:
 
     def __init__(self):
         self.match_count = None
+        self.window_info = None
         self.loop = None
         DBusGMainLoop(set_as_default=True)
         self.bus = dbus.SessionBus()
@@ -248,16 +255,27 @@ class DBusMessageReceiver:
         if self.loop:
             self.loop.quit()
 
+    def window_info_handler(self, info_str):
+        """Handle windowInfo message from KWin script."""
+        self.window_info = info_str
+        if self.loop:
+            self.loop.quit()
+
     def register_handlers(self):
         """Register D-Bus method handlers."""
         self.bus.add_message_filter(self._message_filter)
 
     def _message_filter(self, bus, message):
         """Filter incoming D-Bus messages."""
-        if message.get_member() == 'matchCount':
+        member = message.get_member()
+        if member == 'matchCount':
             args = message.get_args_list()
             if args:
                 self.match_count_handler(args[0])
+        elif member == 'windowInfo':
+            args = message.get_args_list()
+            if args:
+                self.window_info_handler(args[0])
         return dbus.lowlevel.HANDLER_RESULT_HANDLED
 
     def wait_for_response(self, timeout_ms=5000):
