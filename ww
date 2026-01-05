@@ -264,7 +264,8 @@ is_running_check() {
     fi
 }
 
-if is_running_check; then
+# Fire and forget mode: if no process specified, skip check and just try to raise window
+if [[ -z "$PROCESS" ]] || is_running_check; then
 	# trying for XDG_CONFIG_HOME first.
 	# shellcheck disable=SC2154
 	SCRIPT_FOLDER_ROOT=$XDG_CONFIG_HOME
