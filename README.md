@@ -83,9 +83,11 @@ When you run, for example `ww -f firefox -c firefox`, ww tries to find a process
 
 `pgrep -o -f firefox`
 
-This detects if the application is running or not.
+This detects if the application is running or not. If the process is running, ww creates a KWin script to raise the window. If not, it launches the command specified with `-c`.
 
-Then ww creates a file inside `~/.wwscripts` to store a temporary kwin script, it loads the script, runs it, stops it and unloads it in a single go.
+However, if you omit both `-c` and `-p` options (fire and forget mode), ww skips the process check entirely and directly attempts to raise any matching window. This is useful when you just want to raise an existing window without worrying about launching or checking processes.
+
+In both cases, ww creates a file inside `~/.wwscripts` to store a temporary kwin script, it loads the script, runs it, stops it and unloads it in a single go.
 
 The kwin script is targeted to find and focus a specific window.
 
@@ -95,5 +97,5 @@ The `-ia` option works differently: it uses KWin's scripting API to query inform
 
 Here some ideas of improvements that I'd like to explore, but my knowledge on kwin scripts doesn't allow me:
 
-- Do not depend on pgrep to detect if an application is open?
+- Do not depend on pgrep to detect if an application is open? (partially addressed: fire and forget mode skips pgrep entirely)
 - Use a single kwin script with signals instead of loading and running one each time?
