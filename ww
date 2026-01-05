@@ -38,7 +38,7 @@ while [[ $# -gt 0 ]]; do
 	-ia | --info-active)
 		INFO_ACTIVE="1"
 		shift # past argument
-		;;			
+		;;
 	-u | --current-user)
 		CURRENTUSERONLY="true"
 		shift # past argument
@@ -83,8 +83,8 @@ EOF
 	exit 0
 fi
 
-dbus_kwin () {
-    dbus-send --session --dest=org.kde.KWin --print-reply=literal "$@"
+dbus_kwin() {
+	dbus-send --session --dest=org.kde.KWin --print-reply=literal "$@"
 }
 
 # Cache the version to avoid slow DBus call on every run
@@ -97,52 +97,52 @@ function get_kwin_version() {
 	fi
 	# Pipe directly to awk to avoid storing massive support info in bash variable
 	kwinVersion=$(dbus_kwin /KWin org.kde.KWin.supportInformation | awk '/KWin version:/ {print $3}') || exit 1
-	echo "$kwinVersion" > "$cache_file"
+	echo "$kwinVersion" >"$cache_file"
 	echo "$kwinVersion"
 }
 
 if [[ -n "$INFO_ACTIVE" ]]; then
-    kwinVersion=$(get_kwin_version)
-    kwinMajorVersion="$(awk -F"." '{print $1}' <<< "$kwinVersion")" || exit 1    
-    # This feature needs at least this KWin version
-    readonly minimumVersion=6 || exit 1
-    if [[ "$kwinMajorVersion" -lt "$minimumVersion" ]]; then
-        echo "ERROR: This feature needs KWin $minimumVersion or later." >&2 
-        exit 1
-    fi
+	kwinVersion=$(get_kwin_version)
+	kwinMajorVersion="$(awk -F"." '{print $1}' <<<"$kwinVersion")" || exit 1
+	# This feature needs at least this KWin version
+	readonly minimumVersion=6 || exit 1
+	if [[ "$kwinMajorVersion" -lt "$minimumVersion" ]]; then
+		echo "ERROR: This feature needs KWin $minimumVersion or later." >&2
+		exit 1
+	fi
 
-    # This way is similar to the one used on https://discuss.kde.org/t/xdotool-replacement-on-wayland/7242/9
-    jsFile="$(mktemp)" || exit 1   # It is the file where the javascript code is going to be saved
-    echo "print(\"$jsFile\",workspace.activeWindow.internalId);" > "$jsFile" || exit 1
-    
-    scriptId_response="$(dbus_kwin /Scripting org.kde.kwin.Scripting.loadScript "string:$jsFile")" || exit 1
-    scriptId=$(awk '{print $2}' <<< "$scriptId_response") || exit 1
-    timestamp="$(date +"%Y-%m-%d %H:%M:%S")" || exit 1
-    # Starts the script
-    dbus_kwin "/Scripting/Script$scriptId" org.kde.kwin.Script.run || exit 1
-    
-    # Uses some arguments that are also seen on https://github.com/jinliu/kdotool/blob/master/src/main.rs
-    outputJournalctl="$(journalctl --since "$timestamp" --user --user-unit=plasma-kwin_wayland.service --user-unit=plasma-kwin_x11.service --output=cat -g "js: $jsFile")" || exit 1
-    # Uses `awk` separately in order to avoid masking a return value, as Shellcheck recommends
-    windowId="$(awk '{print $3}' <<< "$outputJournalctl")" || exit 1
-	
+	# This way is similar to the one used on https://discuss.kde.org/t/xdotool-replacement-on-wayland/7242/9
+	jsFile="$(mktemp)" || exit 1 # It is the file where the javascript code is going to be saved
+	echo "print(\"$jsFile\",workspace.activeWindow.internalId);" >"$jsFile" || exit 1
+
+	scriptId_response="$(dbus_kwin /Scripting org.kde.kwin.Scripting.loadScript "string:$jsFile")" || exit 1
+	scriptId=$(awk '{print $2}' <<<"$scriptId_response") || exit 1
+	timestamp="$(date +"%Y-%m-%d %H:%M:%S")" || exit 1
+	# Starts the script
+	dbus_kwin "/Scripting/Script$scriptId" org.kde.kwin.Script.run || exit 1
+
+	# Uses some arguments that are also seen on https://github.com/jinliu/kdotool/blob/master/src/main.rs
+	outputJournalctl="$(journalctl --since "$timestamp" --user --user-unit=plasma-kwin_wayland.service --user-unit=plasma-kwin_x11.service --output=cat -g "js: $jsFile")" || exit 1
+	# Uses `awk` separately in order to avoid masking a return value, as Shellcheck recommends
+	windowId="$(awk '{print $3}' <<<"$outputJournalctl")" || exit 1
+
 	# Stops the script, background the '.stop' call so the script exits immediately (~15ms hidden).
 	nohup dbus-send --session --dest=org.kde.KWin --print-reply=literal "/Scripting/Script$scriptId" org.kde.kwin.Script.stop >/dev/null 2>&1 &
-    
-    if command -v qdbus 2>&1 >/dev/null; then
-        qdbus_bin=qdbus
-    elif command -v qdbus6 2>&1 >/dev/null; then
-        # On Arch some users might only have qt6-tools installed
-        qdbus_bin=qdbus6
-    else
-        echo "'qdbus' or 'qdbus6' command not found, aborting."
-        exit 1
-    fi
 
-    # Shows the information about that window
-    $qdbus_bin org.kde.KWin /KWin org.kde.KWin.getWindowInfo "$windowId" || exit 1
-    
-    exit 0
+	if command -v qdbus 2>&1 >/dev/null; then
+		qdbus_bin=qdbus
+	elif command -v qdbus6 2>&1 >/dev/null; then
+		# On Arch some users might only have qt6-tools installed
+		qdbus_bin=qdbus6
+	else
+		echo "'qdbus' or 'qdbus6' command not found, aborting."
+		exit 1
+	fi
+
+	# Shows the information about that window
+	$qdbus_bin org.kde.KWin /KWin org.kde.KWin.getWindowInfo "$windowId" || exit 1
+
+	exit 0
 fi
 
 SCRIPT_TEMPLATE=$(
@@ -221,20 +221,20 @@ function ensure_script {
 		SCRIPT_CONTENT=${SCRIPT_TEMPLATE/CLASS_NAME/$1}
 		SCRIPT_CONTENT=${SCRIPT_CONTENT/CAPTION_NAME/$2}
 		SCRIPT_CONTENT=${SCRIPT_CONTENT/CLASS_REGEX/$3}
-        SCRIPT_CONTENT=${SCRIPT_CONTENT/TOGGLE/$4}
+		SCRIPT_CONTENT=${SCRIPT_CONTENT/TOGGLE/$4}
 		echo "$SCRIPT_CONTENT" >"$SCRIPT_PATH"
 	fi
 }
 
 # Check if a version string is between two inclusive versions.
 function ver_between() {
-    # args: min, actual, max
-    printf '%s\n' "$@" | sort -C -V
+	# args: min, actual, max
+	printf '%s\n' "$@" | sort -C -V
 }
 
 # Check if a version string is lower than another.
 function ver_lt() {
-    printf '%s\n' "$1" "$2" | sort -C -V
+	printf '%s\n' "$1" "$2" | sort -C -V
 }
 
 if [[ -z "$FILTERBY" && -z "$FILTERALT" && -z "$FILTERREGEX" ]]; then
@@ -244,24 +244,24 @@ fi
 
 USER_FILTER=""
 if [[ -n "$CURRENTUSERONLY" ]] && command -v loginctl >/dev/null 2>&1; then
-    # Only run loginctl if we absolutely have to
-    if session_id=$(loginctl show-seat seat0 -p ActiveSession --value 2>/dev/null); then
-       user_id=$(loginctl show-session "$session_id" -p User --value 2>/dev/null)
-       USER_FILTER="-u $user_id"
-    fi
+	# Only run loginctl if we absolutely have to
+	if session_id=$(loginctl show-seat seat0 -p ActiveSession --value 2>/dev/null); then
+		user_id=$(loginctl show-session "$session_id" -p User --value 2>/dev/null)
+		USER_FILTER="-u $user_id"
+	fi
 fi
 
 # Avoids variable assignment overhead, removes '-a' and '-o' which are unused but slow, uses -x for simple commands (fastest), -f for complex ones.
 is_running_check() {
-    if [[ "$PROCESS" == *" "* ]]; then
-        # Complex command: must use -f
-        # shellcheck disable=SC2086
-        pgrep $USER_FILTER -f "$PROCESS" --ignore-ancestors >/dev/null
-    else
-        # Simple command: use -x (FAST, exact match)
-        # shellcheck disable=SC2086
-        pgrep $USER_FILTER -x "$PROCESS" >/dev/null
-    fi
+	if [[ "$PROCESS" == *" "* ]]; then
+		# Complex command: must use -f
+		# shellcheck disable=SC2086
+		pgrep $USER_FILTER -f "$PROCESS" --ignore-ancestors >/dev/null
+	else
+		# Simple command: use -x (FAST, exact match)
+		# shellcheck disable=SC2086
+		pgrep $USER_FILTER -x "$PROCESS" >/dev/null
+	fi
 }
 
 # Fire and forget mode: if no process specified, skip check and just try to raise window
@@ -276,9 +276,9 @@ if [[ -z "$PROCESS" ]] || is_running_check; then
 
 	SCRIPT_FOLDER="$SCRIPT_FOLDER_ROOT/.wwscripts/"
 	# Uses `md5sum` separately in order to avoid masking a return value, as Shellcheck recommends
-	INFO_MD5SUM=$(md5sum <<< "$FILTERBY$FILTERALT$FILTERREGEX") || exit 1
+	INFO_MD5SUM=$(md5sum <<<"$FILTERBY$FILTERALT$FILTERREGEX") || exit 1
 	# Ensures that the script file exists
-	SCRIPT_NAME=$(head -c 32 <<< "$INFO_MD5SUM") || exit 1
+	SCRIPT_NAME=$(head -c 32 <<<"$INFO_MD5SUM") || exit 1
 	SCRIPT_PATH="$SCRIPT_FOLDER$SCRIPT_NAME"
 	ensure_script "$FILTERBY" "$FILTERALT" "$FILTERREGEX" "$TOGGLE"
 
@@ -286,7 +286,7 @@ if [[ -z "$PROCESS" ]] || is_running_check; then
 
 	INFO_DBUS_SEND=$(dbus_kwin /Scripting org.kde.kwin.Scripting.loadScript "string:$SCRIPT_PATH" "string:$SCRIPT_NAME") || exit 1
 	# Uses `awk` separately in order to avoid masking a return value, as Shellcheck recommends
-	ID=$(awk '{print $2}' <<< "$INFO_DBUS_SEND") || exit 1
+	ID=$(awk '{print $2}' <<<"$INFO_DBUS_SEND") || exit 1
 
 	# Use kwin version to decide how to call the script run api which changes between kwin versions.
 	# See https://github.com/academo/ww-run-raise/issues/15#issuecomment-2632214974 for more info.
