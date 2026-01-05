@@ -47,6 +47,10 @@ if you want to toggle (minimize if active) a window:
 
 `ww -f firefox -c firefox -t`
 
+if you want to raise a window without checking if the process is running (fire and forget mode):
+
+`ww -f firefox`
+
 if you want to see information about the currently active window:
 
 `ww -ia`
