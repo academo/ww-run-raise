@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 TOGGLE="false"
+MOVE_TO_CURRENT="false"
 POSITIONAL=()
 while [[ $# -gt 0 ]]; do
 	key="$1"
@@ -33,6 +34,10 @@ while [[ $# -gt 0 ]]; do
 		;;
 	-t | --toggle)
 		TOGGLE="true"
+		shift # past argument
+		;;
+	-m | --move-to-current)
+		MOVE_TO_CURRENT="true"
 		shift # past argument
 		;;
 	-ia | --info-active)
@@ -76,6 +81,7 @@ Parameters:
 -fa --filter-alternative  filter by window title (caption)
 -fr --filter-regex        filter by window class using regex pattern
 -t  --toggle              also minimize the window if it is already active
+-m  --move-to-current     move the window to the current virtual desktop instead of switching to its desktop
 -c  --command             command to check if running and run if no process is found
 -p --process              override the process name used when checking if running, defaults to --command
 -u --current-user         will only search processes of the current user. requires loginctl
@@ -147,7 +153,7 @@ fi
 
 SCRIPT_TEMPLATE=$(
 	cat <<EOF
-function kwinactivateclient(clientClass, clientCaption, clientClassRegex, toggle) {
+function kwinactivateclient(clientClass, clientCaption, clientClassRegex, toggle, moveToCurrentDesktop) {
     var clients = workspace.clientList ? workspace.clientList() : workspace.windowList();
     var activeWindow = workspace.activeClient || workspace.activeWindow;
     var compareToCaption = new RegExp(clientCaption || '', 'i');
@@ -170,7 +176,7 @@ function kwinactivateclient(clientClass, clientCaption, clientClassRegex, toggle
     if (matchingClients.length === 1) {
         var client = matchingClients[0];
         if (activeWindow !== client) {
-            setActiveClient(client);
+            setActiveClient(client, moveToCurrentDesktop);
         } else if (toggle) {
             client.minimized = !client.minimized;
         }
@@ -192,23 +198,32 @@ function kwinactivateclient(clientClass, clientCaption, clientClassRegex, toggle
         if (activeIsMatching) {
             // We're already in this app - cycle through windows (pick first)
             const client = matchingClients[0];
-            setActiveClient(client);
+            setActiveClient(client, moveToCurrentDesktop);
         } else {
             // We're switching from another app - pick most recently active (last)
             const client = matchingClients[matchingClients.length - 1];
-            setActiveClient(client);
+            setActiveClient(client, moveToCurrentDesktop);
         }
     }
 }
 
-function setActiveClient(client){
+function setActiveClient(client, moveToCurrentDesktop){
+    if (moveToCurrentDesktop) {
+        if (client.desktops !== undefined) {
+            // KWin 6+: desktops is an array of VirtualDesktop objects
+            client.desktops = [workspace.currentDesktop];
+        } else {
+            // Older KWin: desktop is a number
+            client.desktop = workspace.currentDesktop;
+        }
+    }
     if (workspace.activeClient !== undefined) {
         workspace.activeClient = client;
     } else {
         workspace.activeWindow = client;
     }
 }
-kwinactivateclient('CLASS_NAME', 'CAPTION_NAME', 'CLASS_REGEX', TOGGLE);
+kwinactivateclient('CLASS_NAME', 'CAPTION_NAME', 'CLASS_REGEX', TOGGLE, MOVE_TO_CURRENT);
 EOF
 )
 
@@ -222,6 +237,7 @@ function ensure_script {
 		SCRIPT_CONTENT=${SCRIPT_CONTENT/CAPTION_NAME/$2}
 		SCRIPT_CONTENT=${SCRIPT_CONTENT/CLASS_REGEX/$3}
 		SCRIPT_CONTENT=${SCRIPT_CONTENT/TOGGLE/$4}
+		SCRIPT_CONTENT=${SCRIPT_CONTENT/MOVE_TO_CURRENT/$5}
 		echo "$SCRIPT_CONTENT" >"$SCRIPT_PATH"
 	fi
 }
@@ -280,7 +296,7 @@ if [[ -z "$PROCESS" ]] || is_running_check; then
 	# Ensures that the script file exists
 	SCRIPT_NAME=$(head -c 32 <<<"$INFO_MD5SUM") || exit 1
 	SCRIPT_PATH="$SCRIPT_FOLDER$SCRIPT_NAME"
-	ensure_script "$FILTERBY" "$FILTERALT" "$FILTERREGEX" "$TOGGLE"
+	ensure_script "$FILTERBY" "$FILTERALT" "$FILTERREGEX" "$TOGGLE" "$MOVE_TO_CURRENT"
 
 	SCRIPT_NAME="ww$RANDOM"
 
