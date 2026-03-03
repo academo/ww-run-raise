@@ -47,6 +47,10 @@ if you want to toggle (minimize if active) a window:
 
 `ww -f firefox -c firefox -t`
 
+if you want to move the window to your current virtual desktop (instead of switching to its desktop):
+
+`ww -f firefox -c firefox -m`
+
 if you want to raise a window without checking if the process is running (fire and forget mode):
 
 `ww -f firefox`
@@ -64,6 +68,7 @@ if you want to see information about the currently active window:
 -fa --filter-alternative  filter by window title (caption)
 -fr --filter-regex        filter by window class using regex pattern
 -t  --toggle              also minimize the window if it is already active
+-m  --move-to-current     move the window to the current virtual desktop instead of switching to its desktop
 -c  --command             command to check if running and run if no process is found
 -p  --process             override the process name used when checking if running, defaults to --command
 -u  --current-user        will only search processes of the current user (requires loginctl)
