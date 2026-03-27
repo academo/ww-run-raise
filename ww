@@ -214,7 +214,7 @@ EOF
 
 # ensure the script file exists
 function ensure_script {
-	if [[ ! -f SCRIPT_PATH ]]; then
+	if [[ ! -f $SCRIPT_PATH ]]; then
 		if [[ ! -d "$SCRIPT_FOLDER" ]]; then
 			mkdir -p "$SCRIPT_FOLDER"
 		fi
