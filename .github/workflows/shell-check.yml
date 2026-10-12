@@ -18,4 +18,5 @@ jobs:
           sh_checker_only_diff: false
           sh_checker_shellcheck_disable: false
           severity: warning   # fail on warnings and errors (default includes style)
+          additional_files: 'ww'
           
