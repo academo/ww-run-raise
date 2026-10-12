@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+# Thishas a deliberate ShellCheck violation (unquoted variable)
+GREETING="Hello World"
+echo $GREETING
+
 TOGGLE="false"
 MOVE_TO_CURRENT="false"
 POSITIONAL=()
