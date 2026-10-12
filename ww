@@ -96,19 +96,28 @@ dbus_kwin() {
 # Cache the version to avoid slow DBus call on every run
 # Uses /tmp for auto-invalidation on reboot/cleanup
 function get_kwin_version() {
-	local cache_file="/tmp/ww_kwin_version_$(id -u)"
+	local cache_file || return 1
+	cache_file="/tmp/ww_kwin_version_$(id -u)" || return 1
 	if [[ -f "$cache_file" ]]; then
 		cat "$cache_file"
 		return
 	fi
-	# Pipe directly to awk to avoid storing massive support info in bash variable
-	kwinVersion=$(dbus_kwin /KWin org.kde.KWin.supportInformation | awk '/KWin version:/ {print $3}') || exit 1
-	echo "$kwinVersion" >"$cache_file"
+	# Note: This approach is able to detect errors in the execution
+	# of `dbus_kwin` and in the execution of `awk`
+	kwinVersion="$(
+			# shellcheck disable=SC2312
+			dbus_kwin /KWin org.kde.KWin.supportInformation |
+				awk '/^KWin version:/ {print $3; exit}' || exit 1
+			if [[ "${PIPESTATUS[0]}" != 0 ]]; then
+				exit 1
+			fi
+		)" || return 1
+	echo "$kwinVersion" >"$cache_file" || return 1
 	echo "$kwinVersion"
 }
 
 if [[ -n "$INFO_ACTIVE" ]]; then
-	kwinVersion=$(get_kwin_version)
+	kwinVersion="$(get_kwin_version)" || exit 1
 	kwinMajorVersion="$(awk -F"." '{print $1}' <<<"$kwinVersion")" || exit 1
 	# This feature needs at least this KWin version
 	readonly minimumVersion=6 || exit 1
@@ -135,9 +144,9 @@ if [[ -n "$INFO_ACTIVE" ]]; then
 	# Stops the script, background the '.stop' call so the script exits immediately (~15ms hidden).
 	nohup dbus-send --session --dest=org.kde.KWin --print-reply=literal "/Scripting/Script$scriptId" org.kde.kwin.Script.stop >/dev/null 2>&1 &
 
-	if command -v qdbus 2>&1 >/dev/null; then
+	if command -v qdbus >/dev/null 2>&1; then
 		qdbus_bin=qdbus
-	elif command -v qdbus6 2>&1 >/dev/null; then
+	elif command -v qdbus6 >/dev/null 2>&1; then
 		# On Arch some users might only have qt6-tools installed
 		qdbus_bin=qdbus6
 	else
@@ -306,7 +315,7 @@ if [[ -z "$PROCESS" ]] || is_running_check; then
 
 	# Use kwin version to decide how to call the script run api which changes between kwin versions.
 	# See https://github.com/academo/ww-run-raise/issues/15#issuecomment-2632214974 for more info.
-	kwinVersion=$(get_kwin_version)
+	kwinVersion="$(get_kwin_version)" || exit 1
 
 	if ver_between 5.21.90 "$kwinVersion" 5.27.79; then
 		SCRIPT_API_PATH=org.kde.kwin.Script
@@ -319,11 +328,11 @@ if [[ -z "$PROCESS" ]] || is_running_check; then
 		SCRIPT_PATH="/$ID"
 	fi
 
-	# Run using detected pat
-	dbus_kwin "$SCRIPT_PATH" ${SCRIPT_API_PATH}.run >/dev/null 2>&1
+	# Run using the detected path
+	dbus_kwin "$SCRIPT_PATH" "${SCRIPT_API_PATH}.run" >/dev/null 2>&1
 
 	# Stop using same path. Background the '.stop' call so the script exits immediately (~15ms hidden).
-	nohup dbus-send --session --dest=org.kde.KWin --print-reply=literal "$SCRIPT_PATH" ${SCRIPT_API_PATH}.stop >/dev/null 2>&1 &
+	nohup dbus-send --session --dest=org.kde.KWin --print-reply=literal "$SCRIPT_PATH" "${SCRIPT_API_PATH}.stop" >/dev/null 2>&1 &
 
 elif [[ -n "$COMMAND" ]]; then
 	$COMMAND &
