@@ -292,7 +292,7 @@ if [[ -z "$PROCESS" ]] || is_running_check; then
 
 	SCRIPT_FOLDER="$SCRIPT_FOLDER_ROOT/.wwscripts/"
 	# Uses `md5sum` separately in order to avoid masking a return value, as Shellcheck recommends
-	INFO_MD5SUM=$(md5sum <<<"$FILTERBY$FILTERALT$FILTERREGEX") || exit 1
+	INFO_MD5SUM=$(md5sum <<<"$FILTERBY$FILTERALT$FILTERREGEX$TOGGLE$MOVE_TO_CURRENT") || exit 1
 	# Ensures that the script file exists
 	SCRIPT_NAME=$(head -c 32 <<<"$INFO_MD5SUM") || exit 1
 	SCRIPT_PATH="$SCRIPT_FOLDER$SCRIPT_NAME"
