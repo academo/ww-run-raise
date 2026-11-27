@@ -326,5 +326,5 @@ if [[ -z "$PROCESS" ]] || is_running_check; then
 	nohup dbus-send --session --dest=org.kde.KWin --print-reply=literal "$SCRIPT_PATH" ${SCRIPT_API_PATH}.stop >/dev/null 2>&1 &
 
 elif [[ -n "$COMMAND" ]]; then
-	$COMMAND &
+	$COMMAND </dev/null >/dev/null 2>&1 &
 fi
